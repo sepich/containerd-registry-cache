@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/jamesorlakin/cacheyd/pkg/mux"
+	"github.com/jamesorlakin/cacheyd/pkg/service"
 )
 
 type JsonableRequest struct {
@@ -23,7 +24,7 @@ type JsonableRequest struct {
 }
 
 func main() {
-	log.Println("Starting Simple HTTP echo")
+	log.Println("Starting cacheyd")
 
 	port := 3000
 	portEnv := os.Getenv("PORT")
@@ -36,15 +37,20 @@ func main() {
 	listenStr := ":" + strconv.Itoa(port)
 	log.Printf("Listening on %s", listenStr)
 
-	router := mux.NewRouter()
+	router := mux.NewRouter(&service.CacheydService{})
 
-	err := http.ListenAndServe(listenStr, router)
+	everything := func(w http.ResponseWriter, r *http.Request) {
+		logRequest(r)
+		router.ServeHTTP(w, r)
+	}
+
+	err := http.ListenAndServe(listenStr, http.HandlerFunc(everything))
 	if err != nil {
 		log.Panic(err)
 	}
 }
 
-func handleRequest(w http.ResponseWriter, r *http.Request) {
+func logRequest(r *http.Request) {
 	// http.Request contains methods which the JSON marshaller doesn't like.
 	jsonRequest := JsonableRequest{
 		Method:        r.Method,
@@ -57,10 +63,10 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		RequestURI:    r.RequestURI,
 	}
 	log.Printf("Received HTTP request: %+v\n", jsonRequest)
-	requestJson, err := json.MarshalIndent(jsonRequest, "", "\t")
+	_, err := json.MarshalIndent(jsonRequest, "", "\t")
 	if err != nil {
 		log.Printf("Error encoding JSON: %v", err)
 	}
 
-	w.Write(requestJson)
+	// log.Print(requestJson)
 }

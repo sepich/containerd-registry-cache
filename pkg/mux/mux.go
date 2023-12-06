@@ -4,17 +4,13 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/jamesorlakin/cacheyd/pkg/service"
 )
 
 // Based off the result of remoteName from https://github.com/distribution/distribution's regexp.go
 const imageNamePattern = "[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*"
 
-type Service interface {
-	GetManifest(repo string, ref string, registry string, headers *http.Header, w http.ResponseWriter)
-	GetBlob(repo string, digest string, registry string, headers *http.Header, w http.ResponseWriter)
-}
-
-func NewRouter(services Service) *mux.Router {
+func NewRouter(services service.Service) *mux.Router {
 	r := mux.NewRouter()
 
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
