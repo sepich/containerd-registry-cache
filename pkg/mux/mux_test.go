@@ -11,10 +11,10 @@ import (
 
 type noOpService struct{}
 
-func (s *noOpService) GetManifest(repo string, ref string, registry string, headers *http.Header, w http.ResponseWriter) {
+func (s *noOpService) GetManifest(repo string, ref string, registry string, isHead bool, headers *http.Header, w http.ResponseWriter) {
 	w.Write([]byte("{}"))
 }
-func (s *noOpService) GetBlob(repo string, digest string, registry string, headers *http.Header, w http.ResponseWriter) {
+func (s *noOpService) GetBlob(repo string, digest string, registry string, isHead bool, headers *http.Header, w http.ResponseWriter) {
 }
 
 func TestManifestsPaths(t *testing.T) {

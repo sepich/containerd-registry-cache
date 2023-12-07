@@ -28,7 +28,14 @@ func NewRouter(services service.Service) *mux.Router {
 			return
 		}
 
-		services.GetManifest(repo, vars["ref"], registry, &r.Header, w)
+		isHead := false
+		if r.Method == "HEAD" {
+			// isHead = true
+		} else if r.Method != "GET" {
+			// No method
+		}
+
+		services.GetManifest(repo, vars["ref"], registry, isHead, &r.Header, w)
 	})
 
 	// I assume registries ensure a form of SHA hash here, but let's not care about that.
@@ -43,7 +50,14 @@ func NewRouter(services service.Service) *mux.Router {
 			return
 		}
 
-		services.GetBlob(repo, vars["digest"], registry, &r.Header, w)
+		isHead := false
+		if r.Method == "HEAD" {
+			isHead = true
+		} else if r.Method != "GET" {
+			// No method
+		}
+
+		services.GetBlob(repo, vars["digest"], registry, isHead, &r.Header, w)
 	})
 
 	return r

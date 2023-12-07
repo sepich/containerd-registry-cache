@@ -10,8 +10,8 @@ import (
 )
 
 type Service interface {
-	GetManifest(repo, ref, registry string, headers *http.Header, w http.ResponseWriter)
-	GetBlob(repo, digest, registry string, headers *http.Header, w http.ResponseWriter)
+	GetManifest(repo, ref, registry string, isHead bool, headers *http.Header, w http.ResponseWriter)
+	GetBlob(repo, digest, registry string, isHead bool, headers *http.Header, w http.ResponseWriter)
 }
 
 var errIsNon200 = errors.New("Registry returned non-200 code")
@@ -23,18 +23,23 @@ type CacheydService struct {
 
 var _ Service = &CacheydService{}
 
-func (s *CacheydService) GetManifest(repo, ref, registry string, headers *http.Header, w http.ResponseWriter) {
+func (s *CacheydService) GetManifest(repo, ref, registry string, isHead bool, headers *http.Header, w http.ResponseWriter) {
 	log.Printf("GetManifest: %s, %s, %s", repo, ref, registry)
+	log.Printf("GetManifest: isHead %v", isHead)
 	log.Printf("GetManifest: %v", headers)
 
-	cacheOrProxy(true, repo, ref, registry, headers, w)
+	cacheOrProxy(true, isHead, repo, ref, registry, headers, w)
 }
 
-func (s *CacheydService) GetBlob(repo, digest, registry string, headers *http.Header, w http.ResponseWriter) {
-	cacheOrProxy(false, repo, digest, registry, headers, w)
+func (s *CacheydService) GetBlob(repo, digest, registry string, isHead bool, headers *http.Header, w http.ResponseWriter) {
+	log.Printf("GetBlob: %s, %s, %s", repo, digest, registry)
+	log.Printf("GetBlob: isHead %v", isHead)
+	log.Printf("GetBlob: %v", headers)
+
+	cacheOrProxy(false, isHead, repo, digest, registry, headers, w)
 }
 
-func cacheOrProxy(isManifest bool, repo, ref, registry string, headers *http.Header, w http.ResponseWriter) {
+func cacheOrProxy(isManifest bool, isHead bool, repo, ref, registry string, headers *http.Header, w http.ResponseWriter) {
 	// TODO: Lookup cache
 
 	w.Header().Add("X-Proxied-By", "cacheyd")
@@ -45,25 +50,45 @@ func cacheOrProxy(isManifest bool, repo, ref, registry string, headers *http.Hea
 		url = "https://%s/v2/%s/manifests/%s"
 	}
 
-	upstreamResp, err := proxySuccessOrError(fmt.Sprintf(url, registry, repo, ref), headers.Get("Authorization"))
+	// In thory a HEAD should return the same headers as asking for a GET
+	// However, at least for quay.io, the Docker-Content-Digest is wrong for a GET of a manifest.
+	// In my tinkering this resulted in a hash which couldn't be queried as a manifest or a blob.
+	// So lets just actually ask the regstry directly like how containerd is trying.
+	method := "GET"
+	if isHead {
+		method = "HEAD"
+	}
+	upstreamResp, err := proxySuccessOrError(fmt.Sprintf(url, registry, repo, ref), method, headers)
+	log.Printf("cacheOrProxy got headers: %v", upstreamResp.Header)
+
 	if err != nil {
 		log.Printf("cacheOrProxy err: %v", err)
 		if errors.Is(err, errIsNon200) {
 			copyHeaders(w.Header(), upstreamResp.Header)
 			w.WriteHeader(upstreamResp.StatusCode)
 
-			readIntoWriters([]io.Writer{w}, upstreamResp.Body)
+			if !isHead {
+				readIntoWriters([]io.Writer{w}, upstreamResp.Body)
+			}
 		}
+		upstreamResp.Body.Close()
 		return
 	}
+	defer upstreamResp.Body.Close()
 
 	copyHeaders(w.Header(), upstreamResp.Header)
 	log.Print("Got status ", upstreamResp.StatusCode)
 	w.WriteHeader(upstreamResp.StatusCode)
-	// TODO: Cache!
-	readIntoWriters([]io.Writer{w, &StdouteyBoi{}}, upstreamResp.Body)
 
-	upstreamResp.Body.Close()
+	// TODO: Cache!
+
+	writers := []io.Writer{w}
+	if isManifest {
+		writers = append(writers, &StdouteyBoi{})
+	}
+	if !isHead {
+		readIntoWriters(writers, upstreamResp.Body)
+	}
 }
 
 type StdouteyBoi struct{}
@@ -97,6 +122,7 @@ func readIntoWriters(dst []io.Writer, src io.Reader) error {
 		}
 		if rerr != nil {
 			if rerr == io.EOF {
+				log.Printf("httputil: EOF reached")
 				rerr = nil
 			}
 			return rerr
@@ -112,8 +138,8 @@ func copyHeaders(dst, src http.Header) {
 	}
 }
 
-func proxySuccessOrError(url string, auth string) (*http.Response, error) {
-	resp, err := proxy(url, auth)
+func proxySuccessOrError(url, method string, headers *http.Header) (*http.Response, error) {
+	resp, err := proxy(url, method, headers)
 	if err != nil {
 		return nil, err
 	}
@@ -125,15 +151,19 @@ func proxySuccessOrError(url string, auth string) (*http.Response, error) {
 	}
 }
 
-func proxy(url string, auth string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(context.TODO(), "GET", url, nil)
+func proxy(url, method string, headers *http.Header) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(context.TODO(), method, url, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	if auth != "" {
-		req.Header.Add("Authorization", auth)
-	}
+	// auth := headers.Get("Authorization")
+	// if auth != "" {
+	// 	req.Header.Add("Authorization", auth)
+	// }
+
+	// Copy headers such as Accept and Authorization
+	copyHeaders(req.Header, *headers)
 
 	resp, err := client.Do(req)
 	if err != nil {
