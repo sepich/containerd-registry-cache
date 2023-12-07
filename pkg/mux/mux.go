@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -9,6 +10,10 @@ import (
 
 // Based off the result of remoteName from https://github.com/distribution/distribution's regexp.go
 const imageNamePattern = "[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*"
+
+var registryOverrides = map[string]string{
+	"docker.io": "registry-1.docker.io",
+}
 
 func NewRouter(services service.Service) *mux.Router {
 	r := mux.NewRouter()
@@ -28,9 +33,14 @@ func NewRouter(services service.Service) *mux.Router {
 			return
 		}
 
+		if registryOverride, ok := registryOverrides[registry]; ok {
+			log.Printf("Replacing registry %s with %s", registry, registryOverride)
+			registry = registryOverride
+		}
+
 		isHead := false
 		if r.Method == "HEAD" {
-			// isHead = true
+			isHead = true
 		} else if r.Method != "GET" {
 			// No method
 		}
@@ -48,6 +58,11 @@ func NewRouter(services service.Service) *mux.Router {
 			w.WriteHeader(400)
 			w.Write([]byte("No ns query string given (are you using containerd?): I don't know what registry to ask for " + repo))
 			return
+		}
+
+		if registryOverride, ok := registryOverrides[registry]; ok {
+			log.Printf("Replacing registry %s with %s", registry, registryOverride)
+			registry = registryOverride
 		}
 
 		isHead := false

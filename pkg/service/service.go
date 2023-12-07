@@ -14,7 +14,6 @@ type Service interface {
 	GetBlob(repo, digest, registry string, isHead bool, headers *http.Header, w http.ResponseWriter)
 }
 
-var errIsNon200 = errors.New("Registry returned non-200 code")
 var client = *&http.Client{}
 
 type CacheydService struct {
@@ -63,7 +62,7 @@ func cacheOrProxy(isManifest bool, isHead bool, repo, ref, registry string, head
 
 	if err != nil {
 		log.Printf("cacheOrProxy err: %v", err)
-		if errors.Is(err, errIsNon200) {
+		if errors.Is(err, &Non200Error{}) {
 			copyHeaders(w.Header(), upstreamResp.Header)
 			w.WriteHeader(upstreamResp.StatusCode)
 
@@ -147,7 +146,7 @@ func proxySuccessOrError(url, method string, headers *http.Header) (*http.Respon
 	if resp.StatusCode == 200 {
 		return resp, err
 	} else {
-		return resp, errIsNon200
+		return resp, &Non200Error{Code: resp.StatusCode}
 	}
 }
 
