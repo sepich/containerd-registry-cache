@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/jamesorlakin/cacheyd/pkg/model"
 	"github.com/jamesorlakin/cacheyd/pkg/service"
 )
 
@@ -45,7 +46,13 @@ func NewRouter(services service.Service) *mux.Router {
 			// No method
 		}
 
-		services.GetManifest(repo, vars["ref"], registry, isHead, &r.Header, w)
+		object := &model.ObjectIdentifier{
+			Registry:   registry,
+			Repository: repo,
+			Ref:        vars["ref"],
+		}
+
+		services.GetManifest(object, isHead, &r.Header, w)
 	})
 
 	// I assume registries ensure a form of SHA hash here, but let's not care about that.
@@ -72,7 +79,13 @@ func NewRouter(services service.Service) *mux.Router {
 			// No method
 		}
 
-		services.GetBlob(repo, vars["digest"], registry, isHead, &r.Header, w)
+		object := &model.ObjectIdentifier{
+			Registry:   registry,
+			Repository: repo,
+			Ref:        vars["digest"],
+		}
+
+		services.GetBlob(object, isHead, &r.Header, w)
 	})
 
 	return r

@@ -6,15 +6,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jamesorlakin/cacheyd/pkg/model"
 	"github.com/stretchr/testify/assert"
 )
 
 type noOpService struct{}
 
-func (s *noOpService) GetManifest(repo string, ref string, registry string, isHead bool, headers *http.Header, w http.ResponseWriter) {
+func (s *noOpService) GetManifest(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
 	w.Write([]byte("{}"))
 }
-func (s *noOpService) GetBlob(repo string, digest string, registry string, isHead bool, headers *http.Header, w http.ResponseWriter) {
+func (s *noOpService) GetBlob(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
 }
 
 func TestManifestsPaths(t *testing.T) {

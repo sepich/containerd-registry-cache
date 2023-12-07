@@ -7,57 +7,53 @@ import (
 	"io"
 	"log"
 	"net/http"
+
+	"github.com/jamesorlakin/cacheyd/pkg/model"
 )
 
 type Service interface {
-	GetManifest(repo, ref, registry string, isHead bool, headers *http.Header, w http.ResponseWriter)
-	GetBlob(repo, digest, registry string, isHead bool, headers *http.Header, w http.ResponseWriter)
+	GetManifest(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter)
+	GetBlob(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter)
 }
 
 var client = *&http.Client{}
 
-type CacheydService struct {
-	dir string
-}
+type CacheydService struct{}
 
 var _ Service = &CacheydService{}
 
-func (s *CacheydService) GetManifest(repo, ref, registry string, isHead bool, headers *http.Header, w http.ResponseWriter) {
-	log.Printf("GetManifest: %s, %s, %s", repo, ref, registry)
+func (s *CacheydService) GetManifest(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
+	log.Printf("GetManifest: %s, %s, %s", object.Repository, object.Ref, object.Registry)
 	log.Printf("GetManifest: isHead %v", isHead)
 	log.Printf("GetManifest: %v", headers)
 
-	cacheOrProxy(true, isHead, repo, ref, registry, headers, w)
+	s.cacheOrProxy(object, isHead, headers, w)
 }
 
-func (s *CacheydService) GetBlob(repo, digest, registry string, isHead bool, headers *http.Header, w http.ResponseWriter) {
-	log.Printf("GetBlob: %s, %s, %s", repo, digest, registry)
+func (s *CacheydService) GetBlob(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
+	log.Printf("GetBlob: %s, %s, %s", object.Repository, object.Ref, object.Registry)
 	log.Printf("GetBlob: isHead %v", isHead)
 	log.Printf("GetBlob: %v", headers)
 
-	cacheOrProxy(false, isHead, repo, digest, registry, headers, w)
+	s.cacheOrProxy(object, isHead, headers, w)
 }
 
-func cacheOrProxy(isManifest bool, isHead bool, repo, ref, registry string, headers *http.Header, w http.ResponseWriter) {
+func (s *CacheydService) cacheOrProxy(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
 	// TODO: Lookup cache
 
 	w.Header().Add("X-Proxied-By", "cacheyd")
-	w.Header().Add("X-Proxied-For", registry)
+	w.Header().Add("X-Proxied-For", object.Registry)
 
 	url := "https://%s/v2/%s/blobs/%s"
-	if isManifest {
+	if object.Type == model.ObjectTypeManifest {
 		url = "https://%s/v2/%s/manifests/%s"
 	}
 
-	// In thory a HEAD should return the same headers as asking for a GET
-	// However, at least for quay.io, the Docker-Content-Digest is wrong for a GET of a manifest.
-	// In my tinkering this resulted in a hash which couldn't be queried as a manifest or a blob.
-	// So lets just actually ask the regstry directly like how containerd is trying.
 	method := "GET"
 	if isHead {
 		method = "HEAD"
 	}
-	upstreamResp, err := proxySuccessOrError(fmt.Sprintf(url, registry, repo, ref), method, headers)
+	upstreamResp, err := proxySuccessOrError(fmt.Sprintf(url, object.Registry, object.Repository, object.Ref), method, headers)
 	log.Printf("cacheOrProxy got headers: %v", upstreamResp.Header)
 
 	if err != nil {
@@ -82,7 +78,7 @@ func cacheOrProxy(isManifest bool, isHead bool, repo, ref, registry string, head
 	// TODO: Cache!
 
 	writers := []io.Writer{w}
-	if isManifest {
+	if object.Type == model.ObjectTypeManifest {
 		writers = append(writers, &StdouteyBoi{})
 	}
 	if !isHead {
@@ -161,7 +157,7 @@ func proxy(url, method string, headers *http.Header) (*http.Response, error) {
 	// 	req.Header.Add("Authorization", auth)
 	// }
 
-	// Copy headers such as Accept and Authorization
+	// Copy headers such as Accept and Authorization, are there any we want to skip?
 	copyHeaders(req.Header, *headers)
 
 	resp, err := client.Do(req)
