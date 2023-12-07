@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestReadFromCache(t *testing.T) {
+func TestReadWriteFromCache(t *testing.T) {
 	testCases := []struct {
 		object   model.ObjectIdentifier
 		name     string
@@ -51,8 +51,10 @@ func TestReadFromCache(t *testing.T) {
 			}`),
 		},
 	}
+
+	// Reading
 	for _, tC := range testCases {
-		t.Run(tC.name, func(t *testing.T) {
+		t.Run("read: "+tC.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
 
 			os.WriteFile(filepath.Join(tmpDir, tC.name), tC.contents, os.ModePerm)
@@ -78,50 +80,10 @@ func TestReadFromCache(t *testing.T) {
 
 		})
 	}
-}
 
-func TestWriteToCache(t *testing.T) {
-	testCases := []struct {
-		object   model.ObjectIdentifier
-		name     string
-		contents []byte
-		manifest []byte
-	}{
-		{
-			object: model.ObjectIdentifier{
-				Registry:   "docker.io",
-				Repository: "user/repository",
-				Ref:        "v1.2.3",
-				Type:       model.ObjectTypeManifest,
-			},
-			name:     "docker.io-m-user_repository-v1.2.3",
-			contents: []byte(`6bytes`),
-			manifest: []byte(`{
-				"Registry": "docker.io",
-				"Repository": "user/repository",
-				"Ref": "v1.2.3",
-				"Type": "manifest"
-			}`),
-		},
-		{
-			object: model.ObjectIdentifier{
-				Registry:   "docker.io",
-				Repository: "user/repository",
-				Ref:        "sha256:41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814",
-				Type:       model.ObjectTypeBlob,
-			},
-			name:     "docker.io-b-sha256:41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814",
-			contents: []byte(`6bytes`),
-			manifest: []byte(`{
-				"Registry": "docker.io",
-				"Repository": "user/repository",
-				"Ref": "sha256:41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814",
-				"Type": "blob"
-			}`),
-		},
-	}
+	// Writing
 	for _, tC := range testCases {
-		t.Run(tC.name, func(t *testing.T) {
+		t.Run("write: "+tC.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
 
 			cacheService := &FileCache{
