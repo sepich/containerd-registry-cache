@@ -2,7 +2,6 @@ package cache
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -28,11 +27,4 @@ func ObjectToCacheName(object *model.ObjectIdentifier) string {
 	// TODO: Actually make this clean up each section
 	key := strings.ReplaceAll(keyDirty, "/", "_")
 	return key
-}
-
-func fileExists(path string) bool {
-	if _, err := os.Stat(path); err == nil {
-		return true
-	}
-	return false
 }
