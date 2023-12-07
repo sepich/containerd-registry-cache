@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -75,6 +76,81 @@ func TestReadFromCache(t *testing.T) {
 			assert.Nil(t, err)
 			assert.Equal(t, tC.contents, contents)
 
+		})
+	}
+}
+
+func TestWriteToCache(t *testing.T) {
+	testCases := []struct {
+		object   model.ObjectIdentifier
+		name     string
+		contents []byte
+		manifest []byte
+	}{
+		{
+			object: model.ObjectIdentifier{
+				Registry:   "docker.io",
+				Repository: "user/repository",
+				Ref:        "v1.2.3",
+				Type:       model.ObjectTypeManifest,
+			},
+			name:     "docker.io-m-user_repository-v1.2.3",
+			contents: []byte(`6bytes`),
+			manifest: []byte(`{
+				"Registry": "docker.io",
+				"Repository": "user/repository",
+				"Ref": "v1.2.3",
+				"Type": "manifest"
+			}`),
+		},
+		{
+			object: model.ObjectIdentifier{
+				Registry:   "docker.io",
+				Repository: "user/repository",
+				Ref:        "sha256:41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814",
+				Type:       model.ObjectTypeBlob,
+			},
+			name:     "docker.io-b-sha256:41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814",
+			contents: []byte(`6bytes`),
+			manifest: []byte(`{
+				"Registry": "docker.io",
+				"Repository": "user/repository",
+				"Ref": "sha256:41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814",
+				"Type": "blob"
+			}`),
+		},
+	}
+	for _, tC := range testCases {
+		t.Run(tC.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+
+			cacheService := &FileCache{
+				CacheDirectory: tmpDir,
+			}
+
+			cachedObject, writer, err := cacheService.GetCache(&tC.object)
+			assert.Nil(t, err)
+			assert.NotNil(t, writer)
+			assert.Nil(t, cachedObject)
+
+			n, err := writer.Write(tC.contents)
+			assert.Nil(t, err)
+			assert.Equal(t, 6, n)
+
+			err = writer.Close()
+			assert.Nil(t, err)
+
+			writtenContents, err := os.ReadFile(filepath.Join(tmpDir, tC.name))
+			assert.Nil(t, err)
+			assert.Equal(t, tC.contents, writtenContents)
+
+			writtenManifestBytes, err := os.ReadFile(filepath.Join(tmpDir, tC.name+".json"))
+			assert.Nil(t, err)
+			writtenManifest := CacheManifest{}
+			err = json.Unmarshal(writtenManifestBytes, &writtenManifest)
+			assert.Nil(t, err)
+
+			assert.Equal(t, tC.object, writtenManifest.ObjectIdentifier)
 		})
 	}
 }

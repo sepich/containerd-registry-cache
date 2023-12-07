@@ -32,6 +32,9 @@ func (c *FileCache) GetCache(object *model.ObjectIdentifier) (*CachedObject, *Ca
 	if err != nil {
 		return nil, nil, err
 	}
+	if manifest == nil {
+		return nil, writer, nil
+	}
 
 	reader := &CachedObject{
 		Object:    *object,
