@@ -7,7 +7,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 
+	"github.com/jamesorlakin/cacheyd/pkg/cache"
 	"github.com/jamesorlakin/cacheyd/pkg/model"
 )
 
@@ -18,7 +20,9 @@ type Service interface {
 
 var client = *&http.Client{}
 
-type CacheydService struct{}
+type CacheydService struct {
+	Cache cache.CachingService
+}
 
 var _ Service = &CacheydService{}
 
@@ -39,10 +43,26 @@ func (s *CacheydService) GetBlob(object *model.ObjectIdentifier, isHead bool, he
 }
 
 func (s *CacheydService) cacheOrProxy(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
-	// TODO: Lookup cache
-
 	w.Header().Add("X-Proxied-By", "cacheyd")
 	w.Header().Add("X-Proxied-For", object.Registry)
+
+	// TODO: Lookup cache
+	cached, cacheWriter, err := s.Cache.GetCache(object)
+
+	if err != nil {
+		w.WriteHeader(500)
+		return
+	}
+
+	if cached != nil {
+		log.Printf("cacheOrProxy got cache!: %v", cached)
+		w.Header().Add("Content-Size", strconv.Itoa(int(cached.SizeBytes)))
+
+		reader, _ := cached.GetReader()
+		readIntoWriters([]io.Writer{w}, reader)
+		reader.Close()
+		return
+	}
 
 	url := "https://%s/v2/%s/blobs/%s"
 	if object.Type == model.ObjectTypeManifest {
@@ -77,12 +97,13 @@ func (s *CacheydService) cacheOrProxy(object *model.ObjectIdentifier, isHead boo
 
 	// TODO: Cache!
 
-	writers := []io.Writer{w}
+	writers := []io.Writer{w, cacheWriter}
 	if object.Type == model.ObjectTypeManifest {
 		writers = append(writers, &StdouteyBoi{})
 	}
 	if !isHead {
 		readIntoWriters(writers, upstreamResp.Body)
+		cacheWriter.Close()
 	}
 }
 

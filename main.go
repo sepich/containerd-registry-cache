@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/jamesorlakin/cacheyd/pkg/cache"
 	"github.com/jamesorlakin/cacheyd/pkg/mux"
 	"github.com/jamesorlakin/cacheyd/pkg/service"
 )
@@ -37,7 +38,12 @@ func main() {
 	listenStr := ":" + strconv.Itoa(port)
 	log.Printf("Listening on %s", listenStr)
 
-	router := mux.NewRouter(&service.CacheydService{})
+	cache := cache.FileCache{
+		CacheDirectory: "/tmp/cacheyd",
+	}
+	router := mux.NewRouter(&service.CacheydService{
+		Cache: &cache,
+	})
 
 	everything := func(w http.ResponseWriter, r *http.Request) {
 		logRequest(r)
