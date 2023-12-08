@@ -56,6 +56,7 @@ func (s *CacheydService) cacheOrProxy(object *model.ObjectIdentifier, isHead boo
 
 	if cached != nil {
 		log.Printf("cacheOrProxy got cache!: %v", cached)
+		w.Header().Add("X-Proxy-Date", cached.CacheDate.String())
 		w.Header().Add("Content-Size", strconv.Itoa(int(cached.SizeBytes)))
 
 		reader, _ := cached.GetReader()
