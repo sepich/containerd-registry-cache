@@ -3,6 +3,7 @@ package cache
 import (
 	"encoding/json"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +13,13 @@ import (
 )
 
 func TestReadWriteFromCache(t *testing.T) {
+	var contentType = "application/vnd.docker.distribution.manifest.list.v2+json"
+	var digest = "sha256:41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814"
+
+	headers := http.Header{}
+	headers.Add(model.HeaderContentType, contentType)
+	headers.Add(model.HeaderDockerContentDigest, digest)
+
 	testCases := []struct {
 		object   model.ObjectIdentifier
 		name     string
@@ -29,6 +37,8 @@ func TestReadWriteFromCache(t *testing.T) {
 			contents: []byte(`6bytes`),
 			manifest: []byte(`{
 				"Registry": "docker.io",
+				"ContentType": "application/vnd.docker.distribution.manifest.list.v2+json",
+				"DockerContentDigest": "sha256:41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814",
 				"Repository": "user/repository",
 				"Ref": "v1.2.3",
 				"Type": "manifest"
@@ -45,6 +55,8 @@ func TestReadWriteFromCache(t *testing.T) {
 			contents: []byte(`6bytes`),
 			manifest: []byte(`{
 				"Registry": "docker.io",
+				"ContentType": "application/vnd.docker.distribution.manifest.list.v2+json",
+				"DockerContentDigest": "sha256:41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814",
 				"Repository": "user/repository",
 				"Ref": "sha256:41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814",
 				"Type": "blob"
@@ -70,6 +82,8 @@ func TestReadWriteFromCache(t *testing.T) {
 			assert.NotNil(t, cachedObject)
 
 			assert.Equal(t, int64(6), cachedObject.SizeBytes)
+			assert.Equal(t, contentType, cachedObject.ContentType)
+			assert.Equal(t, digest, cachedObject.DockerContentDigest)
 
 			reader, err := cachedObject.GetReader()
 			assert.Nil(t, err)
@@ -99,7 +113,7 @@ func TestReadWriteFromCache(t *testing.T) {
 			assert.Nil(t, err)
 			assert.Equal(t, 6, n)
 
-			err = writer.Close()
+			err = writer.Close(headers.Get(model.HeaderContentType), headers.Get(model.HeaderDockerContentDigest))
 			assert.Nil(t, err)
 
 			writtenContents, err := os.ReadFile(filepath.Join(tmpDir, tC.name))
@@ -113,6 +127,8 @@ func TestReadWriteFromCache(t *testing.T) {
 			assert.Nil(t, err)
 
 			assert.Equal(t, tC.object, writtenManifest.ObjectIdentifier)
+			assert.Equal(t, contentType, writtenManifest.ContentType)
+			assert.Equal(t, digest, writtenManifest.DockerContentDigest)
 		})
 	}
 }

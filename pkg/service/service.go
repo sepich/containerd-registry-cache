@@ -64,9 +64,11 @@ func (s *CacheydService) cacheOrProxy(object *model.ObjectIdentifier, isHead boo
 
 	if cached != nil {
 		cacheHits.Inc()
-		log.Printf("cacheOrProxy got cache!: %v", cached)
+		log.Printf("cacheOrProxy got cache!: %+v", cached)
 		w.Header().Add("X-Proxy-Date", cached.CacheDate.String())
-		w.Header().Add("Content-Size", strconv.Itoa(int(cached.SizeBytes)))
+		w.Header().Add(model.HeaderContentLength, strconv.Itoa(int(cached.SizeBytes)))
+		w.Header().Add(model.HeaderContentType, cached.ContentType)
+		w.Header().Add(model.HeaderDockerContentDigest, cached.DockerContentDigest)
 
 		reader, _ := cached.GetReader()
 		readIntoWriters([]io.Writer{w}, reader)
@@ -114,7 +116,7 @@ func (s *CacheydService) cacheOrProxy(object *model.ObjectIdentifier, isHead boo
 	}
 
 	readIntoWriters(writers, upstreamResp.Body)
-	cacheWriter.Close()
+	cacheWriter.Close(upstreamResp.Header.Get(model.HeaderContentType), upstreamResp.Header.Get(model.HeaderDockerContentDigest))
 }
 
 type StdouteyBoi struct{}

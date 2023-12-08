@@ -17,7 +17,7 @@ type CacheWriter struct {
 	file           *os.File
 }
 
-var _ io.WriteCloser = &CacheWriter{}
+var _ io.Writer = &CacheWriter{}
 
 func (c *CacheWriter) Write(b []byte) (n int, err error) {
 	if c.file == nil {
@@ -32,7 +32,7 @@ func (c *CacheWriter) Write(b []byte) (n int, err error) {
 }
 
 // Close will (if written to) close the temporary file, generate a cache manifest, and then move it to the cache folder.
-func (c *CacheWriter) Close() error {
+func (c *CacheWriter) Close(contentType, dockerContentDigest string) error {
 	if c.file == nil {
 		return nil
 	}
@@ -51,7 +51,10 @@ func (c *CacheWriter) Close() error {
 
 	manifest := &CacheManifest{
 		ObjectIdentifier: c.Object,
-		CacheDate:        time.Now(),
+
+		ContentType:         contentType,
+		DockerContentDigest: dockerContentDigest,
+		CacheDate:           time.Now(),
 	}
 	manifestFilePath := filePath + cacheManifestSuffix
 

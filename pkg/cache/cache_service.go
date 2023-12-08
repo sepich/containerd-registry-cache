@@ -37,10 +37,9 @@ func (c *FileCache) GetCache(object *model.ObjectIdentifier) (*CachedObject, *Ca
 	}
 
 	reader := &CachedObject{
-		Object:    *object,
-		Path:      cacheFilePath,
-		SizeBytes: size,
-		CacheDate: manifest.CacheDate,
+		CacheManifest: *manifest,
+		Path:          cacheFilePath,
+		SizeBytes:     size,
 	}
 
 	return reader, writer, nil

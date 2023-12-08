@@ -12,7 +12,10 @@ var cacheManifestSuffix = ".json"
 
 type CacheManifest struct {
 	model.ObjectIdentifier
-	CacheDate time.Time
+
+	ContentType         string
+	DockerContentDigest string
+	CacheDate           time.Time
 }
 
 // ObjectToCacheName returns a filename for the relevant object
