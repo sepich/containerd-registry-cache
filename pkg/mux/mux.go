@@ -50,6 +50,7 @@ func NewRouter(services service.Service) *mux.Router {
 			Registry:   registry,
 			Repository: repo,
 			Ref:        vars["ref"],
+			Type:       model.ObjectTypeManifest,
 		}
 
 		services.GetManifest(object, isHead, &r.Header, w)
@@ -83,6 +84,7 @@ func NewRouter(services service.Service) *mux.Router {
 			Registry:   registry,
 			Repository: repo,
 			Ref:        vars["digest"],
+			Type:       model.ObjectTypeBlob,
 		}
 
 		services.GetBlob(object, isHead, &r.Header, w)
