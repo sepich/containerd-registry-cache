@@ -11,6 +11,8 @@ import (
 
 	"github.com/jamesorlakin/cacheyd/pkg/cache"
 	"github.com/jamesorlakin/cacheyd/pkg/model"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 type Service interface {
@@ -18,7 +20,14 @@ type Service interface {
 	GetBlob(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter)
 }
 
-var client = *&http.Client{}
+var client = &http.Client{}
+
+var cacheHits = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "cache_hits",
+})
+var cacheMisses = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "cache_misses",
+})
 
 type CacheydService struct {
 	Cache cache.CachingService
@@ -54,6 +63,7 @@ func (s *CacheydService) cacheOrProxy(object *model.ObjectIdentifier, isHead boo
 	}
 
 	if cached != nil {
+		cacheHits.Inc()
 		log.Printf("cacheOrProxy got cache!: %v", cached)
 		w.Header().Add("X-Proxy-Date", cached.CacheDate.String())
 		w.Header().Add("Content-Size", strconv.Itoa(int(cached.SizeBytes)))
@@ -62,6 +72,8 @@ func (s *CacheydService) cacheOrProxy(object *model.ObjectIdentifier, isHead boo
 		readIntoWriters([]io.Writer{w}, reader)
 		reader.Close()
 		return
+	} else {
+		cacheMisses.Inc()
 	}
 
 	url := "https://%s/v2/%s/blobs/%s"

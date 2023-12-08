@@ -7,6 +7,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/jamesorlakin/cacheyd/pkg/model"
 	"github.com/jamesorlakin/cacheyd/pkg/service"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Based off the result of remoteName from https://github.com/distribution/distribution's regexp.go
@@ -89,6 +90,8 @@ func NewRouter(services service.Service) *mux.Router {
 
 		services.GetBlob(object, isHead, &r.Header, w)
 	})
+
+	r.Handle("/metrics", promhttp.Handler())
 
 	return r
 }
