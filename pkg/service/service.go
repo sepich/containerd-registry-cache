@@ -46,7 +46,6 @@ func (s *CacheydService) cacheOrProxy(object *model.ObjectIdentifier, isHead boo
 	w.Header().Add("X-Proxied-By", "cacheyd")
 	w.Header().Add("X-Proxied-For", object.Registry)
 
-	// TODO: Lookup cache
 	cached, cacheWriter, err := s.Cache.GetCache(object)
 
 	if err != nil {
@@ -70,15 +69,13 @@ func (s *CacheydService) cacheOrProxy(object *model.ObjectIdentifier, isHead boo
 		url = "https://%s/v2/%s/manifests/%s"
 	}
 
-	method := "GET"
-	if isHead {
-		method = "HEAD"
-	}
-	upstreamResp, err := proxySuccessOrError(fmt.Sprintf(url, object.Registry, object.Repository, object.Ref), method, headers)
+	upstreamResp, err := proxySuccessOrError(fmt.Sprintf(url, object.Registry, object.Repository, object.Ref), "GET", headers)
 	log.Printf("cacheOrProxy got headers: %v", upstreamResp.Header)
 
 	if err != nil {
 		log.Printf("cacheOrProxy err: %v", err)
+		// If it's a non-200 status from upstream then just pass it through
+		// This should handle 404s and 401s to request auth
 		if errors.Is(err, &Non200Error{}) {
 			copyHeaders(w.Header(), upstreamResp.Header)
 			w.WriteHeader(upstreamResp.StatusCode)
@@ -96,16 +93,16 @@ func (s *CacheydService) cacheOrProxy(object *model.ObjectIdentifier, isHead boo
 	log.Print("Got status ", upstreamResp.StatusCode)
 	w.WriteHeader(upstreamResp.StatusCode)
 
-	// TODO: Cache!
-
-	writers := []io.Writer{w, cacheWriter}
+	writers := []io.Writer{cacheWriter}
 	if object.Type == model.ObjectTypeManifest {
 		writers = append(writers, &StdouteyBoi{})
 	}
 	if !isHead {
-		readIntoWriters(writers, upstreamResp.Body)
-		cacheWriter.Close()
+		writers = append(writers, w)
 	}
+
+	readIntoWriters(writers, upstreamResp.Body)
+	cacheWriter.Close()
 }
 
 type StdouteyBoi struct{}
