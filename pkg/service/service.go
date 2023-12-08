@@ -126,7 +126,7 @@ func (s *StdouteyBoi) Write(p []byte) (n int, err error) {
 }
 
 func readIntoWriters(dst []io.Writer, src io.Reader) error {
-	buf := make([]byte, 32*1024)
+	buf := make([]byte, 1024*1024)
 	var written int64
 	for {
 		nr, rerr := src.Read(buf)
