@@ -26,7 +26,8 @@ Run an instance (or more, assuming there's shared storage or session affinity). 
 ### Binary Options
 
 Cacheyd can be configured via environment variables:
-> TODO
+- `PORT`: The port to listen on over HTTP, defaulting to `3000`.
+- `CACHE_DIR`: The directory to write cache data to. Will be auto-created if it doesn't exist. Defaults to `/tmp/cacheyd`
 
 ### Kubernetes Manifest Example
 

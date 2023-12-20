@@ -41,8 +41,18 @@ func main() {
 	listenStr := ":" + strconv.Itoa(port)
 	logger.Info("Listening over HTTP", zap.String("port", listenStr))
 
+	cacheDir := os.Getenv("CACHE_DIR")
+	if cacheDir == "" {
+		cacheDir = "/tmp/cacheyd"
+	}
+	err := os.MkdirAll(cacheDir, os.ModePerm)
+	if err != nil {
+		logger.Panic("Could not create cache directory", zap.Error(err))
+	}
+	logger.Info("Using cache directory", zap.String("cacheDirectory", cacheDir))
+
 	cache := cache.FileCache{
-		CacheDirectory: "/tmp/cacheyd",
+		CacheDirectory: cacheDir,
 	}
 	router := mux.NewRouter(&service.CacheydService{
 		Cache: &cache,
@@ -53,7 +63,7 @@ func main() {
 		router.ServeHTTP(w, r)
 	}
 
-	err := http.ListenAndServe(listenStr, http.HandlerFunc(everything))
+	err = http.ListenAndServe(listenStr, http.HandlerFunc(everything))
 	if err != nil {
 		logger.Panic("could not listen", zap.Error(err))
 	}
