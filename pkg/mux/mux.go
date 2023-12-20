@@ -1,13 +1,13 @@
 package mux
 
 import (
-	"log"
 	"net/http"
 
 	"github.com/gorilla/mux"
 	"github.com/jamesorlakin/cacheyd/pkg/model"
 	"github.com/jamesorlakin/cacheyd/pkg/service"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.uber.org/zap"
 )
 
 // Based off the result of remoteName from https://github.com/distribution/distribution's regexp.go
@@ -25,6 +25,8 @@ func NewRouter(services service.Service) *mux.Router {
 	})
 
 	r.HandleFunc("/v2/{repo:"+imageNamePattern+"}/manifests/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		logger := zap.L()
+
 		vars := mux.Vars(r)
 		repo := vars["repo"]
 		registry := r.URL.Query().Get("ns")
@@ -32,11 +34,12 @@ func NewRouter(services service.Service) *mux.Router {
 		if registry == "" {
 			w.WriteHeader(400)
 			w.Write([]byte("No ns query string given (are you using containerd?): I don't know what registry to ask for " + repo))
+			logger.Warn("Request had no ns query string, not sure what registry this is for", zap.String("repo", repo))
 			return
 		}
 
 		if registryOverride, ok := registryOverrides[registry]; ok {
-			log.Printf("Replacing registry %s with %s", registry, registryOverride)
+			logger.Debug("Replacing registry", zap.String("registry", registry), zap.String("registryOverride", registryOverride))
 			registry = registryOverride
 		}
 
@@ -59,6 +62,8 @@ func NewRouter(services service.Service) *mux.Router {
 
 	// I assume registries ensure a form of SHA hash here, but let's not care about that.
 	r.HandleFunc("/v2/{repo:"+imageNamePattern+"}/blobs/{digest}", func(w http.ResponseWriter, r *http.Request) {
+		logger := zap.L()
+
 		vars := mux.Vars(r)
 		repo := vars["repo"]
 		registry := r.URL.Query().Get("ns")
@@ -66,11 +71,13 @@ func NewRouter(services service.Service) *mux.Router {
 		if registry == "" {
 			w.WriteHeader(400)
 			w.Write([]byte("No ns query string given (are you using containerd?): I don't know what registry to ask for " + repo))
+
+			logger.Warn("Request had no ns query string, not sure what registry this is for", zap.String("repo", repo))
 			return
 		}
 
 		if registryOverride, ok := registryOverrides[registry]; ok {
-			log.Printf("Replacing registry %s with %s", registry, registryOverride)
+			logger.Debug("Replacing registry", zap.String("registry", registry), zap.String("registryOverride", registryOverride))
 			registry = registryOverride
 		}
 

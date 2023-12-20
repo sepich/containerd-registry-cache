@@ -1,11 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 
@@ -13,6 +13,7 @@ import (
 	"github.com/jamesorlakin/cacheyd/pkg/model"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"go.uber.org/zap"
 )
 
 type Service interface {
@@ -36,22 +37,24 @@ type CacheydService struct {
 var _ Service = &CacheydService{}
 
 func (s *CacheydService) GetManifest(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
-	log.Printf("GetManifest: %s, %s, %s", object.Repository, object.Ref, object.Registry)
-	log.Printf("GetManifest: isHead %v", isHead)
-	log.Printf("GetManifest: %v", headers)
+	logger := zap.L().With(zap.Any("object", object))
+	// logger.Debug("GetManifest", zap.String("repository", object.Repository), zap.String("ref", object.Ref), zap.String("registry", object.Registry))
+	// logger.Debug("GetManifest: isHead %v", isHead)
+	logger.Debug("GetManifest", zap.Any("headers", headers))
 
-	s.cacheOrProxy(object, isHead, headers, w)
+	s.cacheOrProxy(logger, object, isHead, headers, w)
 }
 
 func (s *CacheydService) GetBlob(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
-	log.Printf("GetBlob: %s, %s, %s", object.Repository, object.Ref, object.Registry)
-	log.Printf("GetBlob: isHead %v", isHead)
-	log.Printf("GetBlob: %v", headers)
+	logger := zap.L().With(zap.Any("object", object))
+	// logger.Debug("GetBlob", zap.String("repository", object.Repository), zap.String("ref", object.Ref), zap.String("registry", object.Registry))
+	// logger.Debug("GetBlob: isHead %v", isHead)
+	logger.Debug("GetBlob", zap.Any("headers", headers))
 
-	s.cacheOrProxy(object, isHead, headers, w)
+	s.cacheOrProxy(logger, object, isHead, headers, w)
 }
 
-func (s *CacheydService) cacheOrProxy(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
+func (s *CacheydService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
 	w.Header().Add("X-Proxied-By", "cacheyd")
 	w.Header().Add("X-Proxied-For", object.Registry)
 
@@ -64,17 +67,18 @@ func (s *CacheydService) cacheOrProxy(object *model.ObjectIdentifier, isHead boo
 
 	if cached != nil {
 		cacheHits.Inc()
-		log.Printf("cacheOrProxy got cache!: %+v", cached)
+		logger.Debug("Cache hit", zap.Any("cached", cached))
 		w.Header().Add("X-Proxy-Date", cached.CacheDate.String())
 		w.Header().Add(model.HeaderContentLength, strconv.Itoa(int(cached.SizeBytes)))
 		w.Header().Add(model.HeaderContentType, cached.ContentType)
 		w.Header().Add(model.HeaderDockerContentDigest, cached.DockerContentDigest)
 
 		reader, _ := cached.GetReader()
-		readIntoWriters([]io.Writer{w}, reader)
+		readIntoWriters(logger, []io.Writer{w}, reader)
 		reader.Close()
 		return
 	} else {
+		logger.Debug("Cache miss")
 		cacheMisses.Inc()
 	}
 
@@ -84,10 +88,10 @@ func (s *CacheydService) cacheOrProxy(object *model.ObjectIdentifier, isHead boo
 	}
 
 	upstreamResp, err := proxySuccessOrError(fmt.Sprintf(url, object.Registry, object.Repository, object.Ref), "GET", headers)
-	log.Printf("cacheOrProxy got headers: %v", upstreamResp.Header)
+	logger.Debug("Got upstream response", zap.Int("status", upstreamResp.StatusCode), zap.Any("headers", upstreamResp.Header))
 
 	if err != nil {
-		log.Printf("cacheOrProxy err: %v", err)
+		logger.Debug("cacheOrProxy err", zap.Error(err))
 		// If it's a non-200 status from upstream then just pass it through
 		// This should handle 404s and 401s to request auth
 		if errors.Is(err, &Non200Error{}) {
@@ -95,7 +99,7 @@ func (s *CacheydService) cacheOrProxy(object *model.ObjectIdentifier, isHead boo
 			w.WriteHeader(upstreamResp.StatusCode)
 
 			if !isHead {
-				readIntoWriters([]io.Writer{w}, upstreamResp.Body)
+				readIntoWriters(logger, []io.Writer{w}, upstreamResp.Body)
 			}
 		}
 		upstreamResp.Body.Close()
@@ -104,34 +108,35 @@ func (s *CacheydService) cacheOrProxy(object *model.ObjectIdentifier, isHead boo
 	defer upstreamResp.Body.Close()
 
 	copyHeaders(w.Header(), upstreamResp.Header)
-	log.Print("Got status ", upstreamResp.StatusCode)
 	w.WriteHeader(upstreamResp.StatusCode)
 
 	writers := []io.Writer{cacheWriter}
+
+	var manifestBytes bytes.Buffer
 	if object.Type == model.ObjectTypeManifest {
-		writers = append(writers, &StdouteyBoi{})
+		writers = append(writers, &manifestBytes)
 	}
+
 	if !isHead {
 		writers = append(writers, w)
 	}
 
-	readIntoWriters(writers, upstreamResp.Body)
+	readIntoWriters(logger, writers, upstreamResp.Body)
+
+	if object.Type == model.ObjectTypeManifest {
+		logger.Debug("Upstream returned manifest", zap.ByteString("manifest", manifestBytes.Bytes()))
+	}
+
 	cacheWriter.Close(upstreamResp.Header.Get(model.HeaderContentType), upstreamResp.Header.Get(model.HeaderDockerContentDigest))
 }
 
-type StdouteyBoi struct{}
-
-func (s *StdouteyBoi) Write(p []byte) (n int, err error) {
-	return log.Writer().Write(p)
-}
-
-func readIntoWriters(dst []io.Writer, src io.Reader) error {
+func readIntoWriters(logger *zap.Logger, dst []io.Writer, src io.Reader) error {
 	buf := make([]byte, 1024*1024)
 	var written int64
 	for {
 		nr, rerr := src.Read(buf)
 		if rerr != nil && rerr != io.EOF && rerr != context.Canceled {
-			log.Printf("httputil: ReverseProxy read error during body copy: %v", rerr)
+			logger.Error("Read error during copy", zap.Error(rerr))
 		}
 		if nr > 0 {
 			written += int64(nr)
@@ -150,7 +155,7 @@ func readIntoWriters(dst []io.Writer, src io.Reader) error {
 		}
 		if rerr != nil {
 			if rerr == io.EOF {
-				log.Printf("httputil: EOF reached")
+				logger.Debug("EOF reached")
 				rerr = nil
 			}
 			return rerr
@@ -184,11 +189,6 @@ func proxy(url, method string, headers *http.Header) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// auth := headers.Get("Authorization")
-	// if auth != "" {
-	// 	req.Header.Add("Authorization", auth)
-	// }
 
 	// Copy headers such as Accept and Authorization, are there any we want to skip?
 	copyHeaders(req.Header, *headers)

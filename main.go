@@ -1,31 +1,34 @@
 package main
 
 import (
-	"encoding/json"
-	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 
 	"github.com/jamesorlakin/cacheyd/pkg/cache"
 	"github.com/jamesorlakin/cacheyd/pkg/mux"
 	"github.com/jamesorlakin/cacheyd/pkg/service"
+	"go.uber.org/zap"
 )
 
 type JsonableRequest struct {
-	Method        string
-	URL           url.URL
-	Proto         string
-	Header        http.Header
-	ContentLength int64
-	Host          string
-	RemoteAddr    string
-	RequestURI    string
+	Method     string
+	Proto      string
+	Header     http.Header
+	Host       string
+	RemoteAddr string
+	RequestURI string
+}
+
+var logger *zap.Logger
+
+func init() {
+	logger = zap.Must(zap.NewDevelopment())
+	zap.ReplaceGlobals(logger)
 }
 
 func main() {
-	log.Println("Starting cacheyd")
+	logger.Info("Starting cacheyd")
 
 	port := 3000
 	portEnv := os.Getenv("PORT")
@@ -36,7 +39,7 @@ func main() {
 		}
 	}
 	listenStr := ":" + strconv.Itoa(port)
-	log.Printf("Listening on %s", listenStr)
+	logger.Info("Listening over HTTP", zap.String("port", listenStr))
 
 	cache := cache.FileCache{
 		CacheDirectory: "/tmp/cacheyd",
@@ -52,27 +55,20 @@ func main() {
 
 	err := http.ListenAndServe(listenStr, http.HandlerFunc(everything))
 	if err != nil {
-		log.Panic(err)
+		logger.Panic("could not listen", zap.Error(err))
 	}
 }
 
 func logRequest(r *http.Request) {
 	// http.Request contains methods which the JSON marshaller doesn't like.
 	jsonRequest := JsonableRequest{
-		Method:        r.Method,
-		URL:           *r.URL,
-		Proto:         r.Proto,
-		Header:        r.Header,
-		ContentLength: r.ContentLength,
-		Host:          r.Host,
-		RemoteAddr:    r.RemoteAddr,
-		RequestURI:    r.RequestURI,
+		Method:     r.Method,
+		Proto:      r.Proto,
+		Header:     r.Header,
+		Host:       r.Host,
+		RemoteAddr: r.RemoteAddr,
+		RequestURI: r.RequestURI,
 	}
-	log.Printf("Received HTTP request: %+v\n", jsonRequest)
-	_, err := json.MarshalIndent(jsonRequest, "", "\t")
-	if err != nil {
-		log.Printf("Error encoding JSON: %v", err)
-	}
+	logger.Debug("Received HTTP request", zap.Any("request", jsonRequest))
 
-	// log.Print(requestJson)
 }
