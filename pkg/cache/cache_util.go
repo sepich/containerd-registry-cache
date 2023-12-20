@@ -14,7 +14,7 @@ type CacheManifest struct {
 	model.ObjectIdentifier
 
 	ContentType         string
-	DockerContentDigest string
+	DockerContentDigest string // Only relevant for manifests
 	CacheDate           time.Time
 }
 

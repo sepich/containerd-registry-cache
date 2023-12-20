@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 
 	"github.com/jamesorlakin/cacheyd/pkg/cache"
 	"github.com/jamesorlakin/cacheyd/pkg/model"
@@ -30,6 +31,13 @@ var cacheMisses = promauto.NewCounter(prometheus.CounterOpts{
 	Name: "cache_misses",
 })
 
+var pool = sync.Pool{
+	New: func() any {
+		buf := make([]byte, 1024*1024)
+		return &buf
+	},
+}
+
 type CacheydService struct {
 	Cache cache.CachingService
 }
@@ -38,8 +46,6 @@ var _ Service = &CacheydService{}
 
 func (s *CacheydService) GetManifest(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
 	logger := zap.L().With(zap.Any("object", object))
-	// logger.Debug("GetManifest", zap.String("repository", object.Repository), zap.String("ref", object.Ref), zap.String("registry", object.Registry))
-	// logger.Debug("GetManifest: isHead %v", isHead)
 	logger.Debug("GetManifest", zap.Any("headers", headers))
 
 	s.cacheOrProxy(logger, object, isHead, headers, w)
@@ -47,8 +53,6 @@ func (s *CacheydService) GetManifest(object *model.ObjectIdentifier, isHead bool
 
 func (s *CacheydService) GetBlob(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
 	logger := zap.L().With(zap.Any("object", object))
-	// logger.Debug("GetBlob", zap.String("repository", object.Repository), zap.String("ref", object.Ref), zap.String("registry", object.Registry))
-	// logger.Debug("GetBlob: isHead %v", isHead)
 	logger.Debug("GetBlob", zap.Any("headers", headers))
 
 	s.cacheOrProxy(logger, object, isHead, headers, w)
@@ -131,7 +135,9 @@ func (s *CacheydService) cacheOrProxy(logger *zap.Logger, object *model.ObjectId
 }
 
 func readIntoWriters(logger *zap.Logger, dst []io.Writer, src io.Reader) error {
-	buf := make([]byte, 1024*1024)
+	buf := *pool.Get().(*[]byte)
+	defer pool.Put(&buf)
+
 	var written int64
 	for {
 		nr, rerr := src.Read(buf)
