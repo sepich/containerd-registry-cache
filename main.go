@@ -57,6 +57,9 @@ func main() {
 	}
 	router := mux.NewRouter(&service.CacheydService{
 		Cache: &cache,
+		IgnoredTags: map[string]struct{}{
+			"latest": {},
+		},
 	})
 
 	everything := func(w http.ResponseWriter, r *http.Request) {

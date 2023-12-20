@@ -30,6 +30,9 @@ var cacheHits = promauto.NewCounter(prometheus.CounterOpts{
 var cacheMisses = promauto.NewCounter(prometheus.CounterOpts{
 	Name: "cache_misses",
 })
+var cacheMissByIgnore = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "cache_miss_by_ignore",
+})
 
 var pool = sync.Pool{
 	New: func() any {
@@ -39,7 +42,9 @@ var pool = sync.Pool{
 }
 
 type CacheydService struct {
-	Cache cache.CachingService
+	Cache         cache.CachingService
+	IgnoredImages map[string]struct{}
+	IgnoredTags   map[string]struct{}
 }
 
 var _ Service = &CacheydService{}
@@ -65,11 +70,28 @@ func (s *CacheydService) cacheOrProxy(logger *zap.Logger, object *model.ObjectId
 	cached, cacheWriter, err := s.Cache.GetCache(object)
 
 	if err != nil {
+		logger.Error("error getting from cache", zap.Error(err))
 		w.WriteHeader(500)
 		return
 	}
 
-	if cached != nil {
+	shouldSkipCache := false
+	// No point skipping blobs - the client either wants them or not.
+	// Unless there's heavy heavy blobs we shouldn't cache?
+	if object.Type == model.ObjectTypeManifest {
+		if _, ignoredTag := s.IgnoredTags[object.Ref]; ignoredTag {
+			logger.Info("Skipping tag due to being on ignore list")
+			shouldSkipCache = true
+		}
+		if _, ignoredImage := s.IgnoredImages[object.Repository]; ignoredImage {
+			logger.Info("Skipping image due to being on ignore list")
+			shouldSkipCache = true
+		}
+	}
+
+	if shouldSkipCache {
+		cacheMissByIgnore.Inc()
+	} else if cached != nil {
 		cacheHits.Inc()
 		logger.Debug("Cache hit", zap.Any("cached", cached))
 		w.Header().Add("X-Proxy-Date", cached.CacheDate.String())
