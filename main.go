@@ -28,7 +28,8 @@ func init() {
 }
 
 func main() {
-	logger.Info("Starting cacheyd")
+	host, _ := os.Hostname()
+	logger.Info("Starting cacheyd", zap.String("hostname", host))
 
 	port := 3000
 	portEnv := os.Getenv("PORT")
