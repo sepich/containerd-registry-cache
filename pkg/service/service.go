@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/jamesorlakin/cacheyd/pkg/cache"
 	"github.com/jamesorlakin/cacheyd/pkg/model"
@@ -94,14 +95,20 @@ func (s *CacheydService) cacheOrProxy(logger *zap.Logger, object *model.ObjectId
 	} else if cached != nil {
 		cacheHits.Inc()
 		logger.Debug("Cache hit", zap.Any("cached", cached))
+
 		w.Header().Add("X-Proxy-Date", cached.CacheDate.String())
+		w.Header().Add("Age", strconv.Itoa(int(time.Since(cached.CacheDate).Seconds())))
 		w.Header().Add(model.HeaderContentLength, strconv.Itoa(int(cached.SizeBytes)))
 		w.Header().Add(model.HeaderContentType, cached.ContentType)
-		w.Header().Add(model.HeaderDockerContentDigest, cached.DockerContentDigest)
+		if cached.DockerContentDigest != "" {
+			w.Header().Add(model.HeaderDockerContentDigest, cached.DockerContentDigest)
+		}
 
 		reader, _ := cached.GetReader()
 		readIntoWriters(logger, []io.Writer{w}, reader)
 		reader.Close()
+
+		logger.Debug("Returning cache hit", zap.Any("headers", w.Header()))
 		return
 	} else {
 		logger.Debug("Cache miss")
@@ -183,7 +190,6 @@ func readIntoWriters(logger *zap.Logger, dst []io.Writer, src io.Reader) error {
 		}
 		if rerr != nil {
 			if rerr == io.EOF {
-				logger.Debug("EOF reached")
 				rerr = nil
 			}
 			return rerr
