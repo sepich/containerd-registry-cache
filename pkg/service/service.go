@@ -16,6 +16,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 type Service interface {
@@ -52,14 +53,22 @@ var _ Service = &CacheydService{}
 
 func (s *CacheydService) GetManifest(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
 	logger := zap.L().With(zap.Any("object", object))
-	logger.Debug("GetManifest", zap.Any("headers", headers))
+	if logger.Level().Enabled(zapcore.DebugLevel) {
+		logger.Info("GetManifest", zap.Any("headers", headers))
+	} else {
+		logger.Info("GetManifest")
+	}
 
 	s.cacheOrProxy(logger, object, isHead, headers, w)
 }
 
 func (s *CacheydService) GetBlob(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
 	logger := zap.L().With(zap.Any("object", object))
-	logger.Debug("GetBlob", zap.Any("headers", headers))
+	if logger.Level().Enabled(zapcore.DebugLevel) {
+		logger.Info("GetBlob", zap.Any("headers", headers))
+	} else {
+		logger.Info("GetBlob")
+	}
 
 	s.cacheOrProxy(logger, object, isHead, headers, w)
 }
@@ -94,7 +103,7 @@ func (s *CacheydService) cacheOrProxy(logger *zap.Logger, object *model.ObjectId
 		cacheMissByIgnore.Inc()
 	} else if cached != nil {
 		cacheHits.Inc()
-		logger.Debug("Cache hit", zap.Any("cached", cached))
+		logger.Info("Cache hit", zap.Any("cached", cached))
 
 		w.Header().Add("X-Proxy-Date", cached.CacheDate.String())
 		w.Header().Add("Age", strconv.Itoa(int(time.Since(cached.CacheDate).Seconds())))
@@ -111,7 +120,7 @@ func (s *CacheydService) cacheOrProxy(logger *zap.Logger, object *model.ObjectId
 		logger.Debug("Returning cache hit", zap.Any("headers", w.Header()))
 		return
 	} else {
-		logger.Debug("Cache miss")
+		logger.Info("Cache miss")
 		cacheMisses.Inc()
 	}
 
@@ -167,25 +176,24 @@ func readIntoWriters(logger *zap.Logger, dst []io.Writer, src io.Reader) error {
 	buf := *pool.Get().(*[]byte)
 	defer pool.Put(&buf)
 
-	var written int64
 	for {
-		nr, rerr := src.Read(buf)
-		if rerr != nil && rerr != io.EOF && rerr != context.Canceled {
-			logger.Error("Read error during copy", zap.Error(rerr))
+		read, rerr := src.Read(buf)
+		if rerr != nil && rerr != io.EOF {
+			err := fmt.Errorf("read error during copy: %w", rerr)
+			logger.Error("", zap.Error(err))
+			return err
 		}
-		if nr > 0 {
-			written += int64(nr)
-			// var werr error
+		if read > 0 {
 			for _, v := range dst {
-				// nw, werr := v.Write(buf[:nr])
-				v.Write(buf[:nr])
-				// TODO: Error handling...
-				// if werr != nil {
-				// 	return written, werr
-				// }
-				// if nr != nw {
-				// 	return written, io.ErrShortWrite
-				// }
+				written, werr := v.Write(buf[:read])
+				if werr == nil && read != written {
+					werr = io.ErrShortWrite
+				}
+				if werr != nil {
+					err := fmt.Errorf("write error during copy: %w", rerr)
+					logger.Error("", zap.Error(err))
+					return err
+				}
 			}
 		}
 		if rerr != nil {
