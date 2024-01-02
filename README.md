@@ -28,6 +28,8 @@ Using both could let cacheyd be a more durable cache for complete node replaceme
 ## Limitations
 
 - cacheyd does **not** currently expire any items in the cache.
+- `latest` tags are ignored and will be passed through to the upstream registry. Blobs for the image contents are still cached.
+  - There is logic to ignore tags and images but currently no configuration option to set them.
 - Pulls of cached images will not require authentication, including images from private registries. This is true of any pod created without `imagePullSecrets` if the image happens to already exist on a node even without cacheyd.
 - This is effectively alpha-level software at this point in time, but it's quite simple and there's not much to go wrong.
 
