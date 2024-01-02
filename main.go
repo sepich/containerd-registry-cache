@@ -23,7 +23,11 @@ type JsonableRequest struct {
 var logger *zap.Logger
 
 func init() {
-	logger = zap.Must(zap.NewDevelopment())
+	logger = zap.Must(zap.NewProduction())
+	if os.Getenv("DEBUG") != "" {
+		logger = zap.Must(zap.NewDevelopment())
+		logger.Debug("Debug logging active, headers will be logged and may include credentials")
+	}
 	zap.ReplaceGlobals(logger)
 }
 

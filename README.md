@@ -41,6 +41,7 @@ Run an instance (or more, assuming there's shared storage or session affinity). 
 Cacheyd can be configured via environment variables:
 - `PORT`: The port to listen on over HTTP, defaulting to `3000`.
 - `CACHE_DIR`: The directory to write cache data to. Will be auto-created if it doesn't exist. Defaults to `/tmp/cacheyd`.
+- `DEBUG`: Set to any non-empty value to use the debug logger. This will log request headers which may contain credentials.
 
 ### Kubernetes Manifest Example
 
