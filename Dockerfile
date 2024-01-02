@@ -12,6 +12,6 @@ FROM deps as build
 COPY . .
 RUN CGO_ENABLED=0 go build -ldflags '-w -extldflags "-static"' .
 
-FROM alpine:3.9
+FROM alpine:3.19
 COPY --from=build /workspace/cacheyd /usr/local/bin/cacheyd
 ENTRYPOINT ["cacheyd"]
