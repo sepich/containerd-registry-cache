@@ -36,6 +36,8 @@ Using both could let cacheyd be a more durable cache for complete node replaceme
 
 Run an instance (or more, assuming there's shared storage or session affinity). This need not live in a Kubernetes cluster and could be shared between them if it works for your needs, either running in a container or just running the Go binary.
 
+A pre-built image is available on Docker Hub: https://hub.docker.com/r/jamesorlakin/cacheyd
+
 ### Binary Options
 
 Cacheyd can be configured via environment variables:
@@ -70,7 +72,7 @@ spec:
         app: cacheyd
     spec:
       containers:
-      - image: cacheyd
+      - image: jamesorlakin/cacheyd:v0.1.0
         imagePullPolicy: IfNotPresent
         name: cacheyd
         ports:
