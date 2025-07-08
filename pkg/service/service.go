@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jamesorlakin/cacheyd/pkg/cache"
-	"github.com/jamesorlakin/cacheyd/pkg/model"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/sepich/containerd-registry-cache/pkg/cache"
+	"github.com/sepich/containerd-registry-cache/pkg/model"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -43,15 +43,15 @@ var pool = sync.Pool{
 	},
 }
 
-type CacheydService struct {
+type CService struct {
 	Cache         cache.CachingService
 	IgnoredImages map[string]struct{}
 	IgnoredTags   map[string]struct{}
 }
 
-var _ Service = &CacheydService{}
+var _ Service = &CService{}
 
-func (s *CacheydService) GetManifest(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
+func (s *CService) GetManifest(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
 	logger := zap.L().With(zap.Any("object", object))
 	if logger.Level().Enabled(zapcore.DebugLevel) {
 		logger.Info("GetManifest", zap.Any("headers", headers))
@@ -62,7 +62,7 @@ func (s *CacheydService) GetManifest(object *model.ObjectIdentifier, isHead bool
 	s.cacheOrProxy(logger, object, isHead, headers, w)
 }
 
-func (s *CacheydService) GetBlob(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
+func (s *CService) GetBlob(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
 	logger := zap.L().With(zap.Any("object", object))
 	if logger.Level().Enabled(zapcore.DebugLevel) {
 		logger.Info("GetBlob", zap.Any("headers", headers))
@@ -73,8 +73,8 @@ func (s *CacheydService) GetBlob(object *model.ObjectIdentifier, isHead bool, he
 	s.cacheOrProxy(logger, object, isHead, headers, w)
 }
 
-func (s *CacheydService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
-	w.Header().Add("X-Proxied-By", "cacheyd")
+func (s *CService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
+	w.Header().Add("X-Proxied-By", "containerd-registry-cache")
 	w.Header().Add("X-Proxied-For", object.Registry)
 
 	cached, cacheWriter, err := s.Cache.GetCache(object)
@@ -130,10 +130,8 @@ func (s *CacheydService) cacheOrProxy(logger *zap.Logger, object *model.ObjectId
 	}
 
 	upstreamResp, err := proxySuccessOrError(fmt.Sprintf(url, object.Registry, object.Repository, object.Ref), "GET", headers)
-	logger.Debug("Got upstream response", zap.Int("status", upstreamResp.StatusCode), zap.Any("headers", upstreamResp.Header))
-
 	if err != nil {
-		logger.Debug("cacheOrProxy err", zap.Error(err))
+		logger.Error("cacheOrProxy err", zap.Error(err))
 		// If it's a non-200 status from upstream then just pass it through
 		// This should handle 404s and 401s to request auth
 		if errors.Is(err, &Non200Error{}) {
@@ -143,10 +141,13 @@ func (s *CacheydService) cacheOrProxy(logger *zap.Logger, object *model.ObjectId
 			if !isHead {
 				readIntoWriters(logger, []io.Writer{w}, upstreamResp.Body)
 			}
+			upstreamResp.Body.Close()
+		} else {
+			w.WriteHeader(500)
 		}
-		upstreamResp.Body.Close()
 		return
 	}
+	logger.Debug("Got upstream response", zap.Int("status", upstreamResp.StatusCode), zap.Any("headers", upstreamResp.Header))
 	defer upstreamResp.Body.Close()
 
 	copyHeaders(w.Header(), upstreamResp.Header)
@@ -219,7 +220,7 @@ func proxySuccessOrError(url, method string, headers *http.Header) (*http.Respon
 		return nil, err
 	}
 
-	if resp.StatusCode == 200 {
+	if resp.StatusCode/100 == 2 {
 		return resp, err
 	} else {
 		return resp, &Non200Error{Code: resp.StatusCode}

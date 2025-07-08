@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jamesorlakin/cacheyd/pkg/model"
+	"github.com/sepich/containerd-registry-cache/pkg/model"
 	"github.com/stretchr/testify/assert"
 )
 

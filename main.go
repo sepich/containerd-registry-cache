@@ -5,9 +5,9 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/jamesorlakin/cacheyd/pkg/cache"
-	"github.com/jamesorlakin/cacheyd/pkg/mux"
-	"github.com/jamesorlakin/cacheyd/pkg/service"
+	"github.com/sepich/containerd-registry-cache/pkg/cache"
+	"github.com/sepich/containerd-registry-cache/pkg/mux"
+	"github.com/sepich/containerd-registry-cache/pkg/service"
 	"go.uber.org/zap"
 )
 
@@ -33,7 +33,7 @@ func init() {
 
 func main() {
 	host, _ := os.Hostname()
-	logger.Info("Starting cacheyd", zap.String("hostname", host))
+	logger.Info("Starting containerd-registry-cache", zap.String("hostname", host))
 
 	port := 3000
 	portEnv := os.Getenv("PORT")
@@ -48,7 +48,7 @@ func main() {
 
 	cacheDir := os.Getenv("CACHE_DIR")
 	if cacheDir == "" {
-		cacheDir = "/tmp/cacheyd"
+		cacheDir = "/tmp/data"
 	}
 	err := os.MkdirAll(cacheDir, os.ModePerm)
 	if err != nil {
@@ -59,7 +59,7 @@ func main() {
 	cache := cache.FileCache{
 		CacheDirectory: cacheDir,
 	}
-	router := mux.NewRouter(&service.CacheydService{
+	router := mux.NewRouter(&service.CService{
 		Cache: &cache,
 		IgnoredTags: map[string]struct{}{
 			"latest": {},

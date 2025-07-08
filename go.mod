@@ -1,6 +1,6 @@
-module github.com/jamesorlakin/cacheyd
+module github.com/sepich/containerd-registry-cache
 
-go 1.19
+go 1.24
 
 require (
 	github.com/gorilla/mux v1.8.1

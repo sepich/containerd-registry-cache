@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jamesorlakin/cacheyd/pkg/model"
+	"github.com/sepich/containerd-registry-cache/pkg/model"
 )
 
 // Type CacheWriter provides a facility to request a stream to write to the cache

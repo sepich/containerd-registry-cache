@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jamesorlakin/cacheyd/pkg/model"
+	"github.com/sepich/containerd-registry-cache/pkg/model"
 )
 
 var cacheManifestSuffix = ".json"

@@ -1,17 +1,11 @@
-FROM golang:1.19-alpine AS deps
-
-WORKDIR /workspace
-# Copy the Go Modules manifests
-COPY go.mod go.mod
-COPY go.sum go.sum
-# cache deps before building and copying source so that we don't need to re-download as much
-# and so that source changes don't invalidate our downloaded layer
+FROM golang:1.24 AS builder
+WORKDIR /app
+COPY go.* ./
 RUN go mod download
-
-FROM deps as build
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags '-w -extldflags "-static"' .
+RUN make build
 
-FROM alpine:3.19
-COPY --from=build /workspace/cacheyd /usr/local/bin/cacheyd
-ENTRYPOINT ["cacheyd"]
+FROM gcr.io/distroless/static-debian11:nonroot
+COPY --from=builder /app/containerd-registry-cache /containerd-registry-cache
+ENTRYPOINT ["/containerd-registry-cache"]
+CMD ["--help"]

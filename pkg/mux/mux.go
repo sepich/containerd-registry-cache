@@ -4,9 +4,9 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/jamesorlakin/cacheyd/pkg/model"
-	"github.com/jamesorlakin/cacheyd/pkg/service"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/sepich/containerd-registry-cache/pkg/model"
+	"github.com/sepich/containerd-registry-cache/pkg/service"
 	"go.uber.org/zap"
 )
 
@@ -21,7 +21,9 @@ func NewRouter(services service.Service) *mux.Router {
 	r := mux.NewRouter()
 
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("cacheyd"))
+		w.Write([]byte(`<h1>containerd-registry-cache</h1>
+		<a href="/metrics">/metrics</a> - prometheus metrics</br>
+		`))
 	})
 
 	r.HandleFunc("/v2/{repo:"+imageNamePattern+"}/manifests/{ref}", func(w http.ResponseWriter, r *http.Request) {

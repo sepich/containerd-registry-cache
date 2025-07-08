@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/jamesorlakin/cacheyd/pkg/model"
+	"github.com/sepich/containerd-registry-cache/pkg/model"
 )
 
 type CachingService interface {
