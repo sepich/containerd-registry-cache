@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -52,10 +53,11 @@ var pool = sync.Pool{
 }
 
 type CacheService struct {
-	Cache         cache.CachingService
-	IgnoredImages map[string]struct{}
-	IgnoredTags   map[string]struct{}
-	DefaultCreds  map[string]RegistryCreds
+	Cache          cache.CachingService
+	IgnoredImages  map[string]struct{}
+	IgnoredTags    *regexp.Regexp
+	DefaultCreds   map[string]RegistryCreds
+	CacheManifests bool
 }
 
 var _ Service = &CacheService{}
@@ -98,9 +100,15 @@ func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIden
 	// No point skipping blobs - the client either wants them or not.
 	// Unless there's heavy heavy blobs we shouldn't cache?
 	if object.Type == model.ObjectTypeManifest {
-		if _, ignoredTag := s.IgnoredTags[object.Ref]; ignoredTag {
-			logger.Info("Skipping tag due to being on ignore list")
+		if !s.CacheManifests {
+			logger.Info("Skipping manifest due to cache manifests disabled")
 			shouldSkipCache = true
+		}
+		if s.IgnoredTags != nil {
+			if s.IgnoredTags.MatchString(object.Ref) {
+				logger.Info("Skipping tag due to match ignore regex")
+				shouldSkipCache = true
+			}
 		}
 		if _, ignoredImage := s.IgnoredImages[object.Repository]; ignoredImage {
 			logger.Info("Skipping image due to being on ignore list")
@@ -243,7 +251,7 @@ func (s *CacheService) proxySuccessOrError(url, method string, headers *http.Hea
 			}
 			if strings.HasPrefix(realm, "Bearer") {
 				params := make(map[string]string)
-				for _, param := range strings.Split(realm[len("Bearer"):], ",") {
+				for param := range strings.SplitSeq(realm[len("Bearer"):], ",") {
 					tmp := strings.SplitN(strings.TrimSpace(param), "=", 2)
 					if len(tmp) != 2 {
 						continue
@@ -269,7 +277,10 @@ func (s *CacheService) proxySuccessOrError(url, method string, headers *http.Hea
 				}
 				tokenResp.Body.Close()
 				data := map[string]string{}
-				json.Unmarshal(body, &data)
+				err = json.Unmarshal(body, &data)
+				if err != nil {
+					return nil, err
+				}
 				if data["token"] == "" {
 					return nil, errors.New("token not found in response")
 				}

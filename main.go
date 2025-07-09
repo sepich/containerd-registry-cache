@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 
 	"github.com/prometheus/common/version"
@@ -37,8 +38,10 @@ func init() {
 
 func main() {
 	var cacheDir = pflag.StringP("cache-dir", "d", "/tmp/data", "Cache directory")
-	var credsFile = pflag.StringP("creds-file", "f", "", "Default credentials to use for registries")
+	var credsFile = pflag.StringP("creds-file", "f", "", "Default credentials file to use for registries")
 	var port = pflag.IntP("port", "p", 3000, "Port to listen on")
+	var ignoreTags = pflag.StringP("ignore", "i", "latest", "RegEx of tags to ignore caching")
+	var cacheManifests = pflag.BoolP("cache-manifests", "m", true, "Cache manifests")
 	var ver = pflag.BoolP("version", "v", false, "Show version and exit")
 	pflag.Parse()
 	if *ver {
@@ -47,7 +50,7 @@ func main() {
 	}
 
 	host, _ := os.Hostname()
-	logger.Info("Starting containerd-registry-cache", zap.String("hostname", host), zap.Int("port", *port), zap.String("cacheDir", *cacheDir))
+	logger.Info("Starting containerd-registry-cache", zap.String("version", version.Version), zap.String("hostname", host), zap.Int("port", *port), zap.String("cacheDir", *cacheDir))
 
 	err := os.MkdirAll(*cacheDir, os.ModePerm)
 	if err != nil {
@@ -81,11 +84,10 @@ func main() {
 	}
 
 	router := mux.NewRouter(&service.CacheService{
-		Cache: &cache,
-		IgnoredTags: map[string]struct{}{
-			"latest": {},
-		},
-		DefaultCreds: defaultCreds,
+		Cache:          &cache,
+		IgnoredTags:    regexp.MustCompile(*ignoreTags),
+		DefaultCreds:   defaultCreds,
+		CacheManifests: *cacheManifests,
 	})
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		logRequest(r)
