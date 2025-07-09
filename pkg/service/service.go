@@ -3,11 +3,14 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +25,11 @@ import (
 type Service interface {
 	GetManifest(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter)
 	GetBlob(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter)
+}
+
+type RegistryCreds struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 var client = &http.Client{}
@@ -43,15 +51,16 @@ var pool = sync.Pool{
 	},
 }
 
-type CService struct {
+type CacheService struct {
 	Cache         cache.CachingService
 	IgnoredImages map[string]struct{}
 	IgnoredTags   map[string]struct{}
+	DefaultCreds  map[string]RegistryCreds
 }
 
-var _ Service = &CService{}
+var _ Service = &CacheService{}
 
-func (s *CService) GetManifest(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
+func (s *CacheService) GetManifest(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
 	logger := zap.L().With(zap.Any("object", object))
 	if logger.Level().Enabled(zapcore.DebugLevel) {
 		logger.Info("GetManifest", zap.Any("headers", headers))
@@ -62,7 +71,7 @@ func (s *CService) GetManifest(object *model.ObjectIdentifier, isHead bool, head
 	s.cacheOrProxy(logger, object, isHead, headers, w)
 }
 
-func (s *CService) GetBlob(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
+func (s *CacheService) GetBlob(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
 	logger := zap.L().With(zap.Any("object", object))
 	if logger.Level().Enabled(zapcore.DebugLevel) {
 		logger.Info("GetBlob", zap.Any("headers", headers))
@@ -73,7 +82,7 @@ func (s *CService) GetBlob(object *model.ObjectIdentifier, isHead bool, headers 
 	s.cacheOrProxy(logger, object, isHead, headers, w)
 }
 
-func (s *CService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
+func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
 	w.Header().Add("X-Proxied-By", "containerd-registry-cache")
 	w.Header().Add("X-Proxied-For", object.Registry)
 
@@ -129,7 +138,7 @@ func (s *CService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIdentifi
 		url = "https://%s/v2/%s/manifests/%s"
 	}
 
-	upstreamResp, err := proxySuccessOrError(fmt.Sprintf(url, object.Registry, object.Repository, object.Ref), "GET", headers)
+	upstreamResp, err := s.proxySuccessOrError(fmt.Sprintf(url, object.Registry, object.Repository, object.Ref), "GET", headers)
 	if err != nil {
 		logger.Error("cacheOrProxy err", zap.Error(err))
 		// If it's a non-200 status from upstream then just pass it through
@@ -214,10 +223,63 @@ func copyHeaders(dst, src http.Header) {
 	}
 }
 
-func proxySuccessOrError(url, method string, headers *http.Header) (*http.Response, error) {
+func (s *CacheService) proxySuccessOrError(url, method string, headers *http.Header) (*http.Response, error) {
 	resp, err := proxy(url, method, headers)
 	if err != nil {
 		return nil, err
+	}
+
+	// retry once with default creds if none provided
+	if resp.StatusCode == 401 && headers.Get("Authorization") == "" {
+		zap.L().Debug("Received 401, retrying with default credentials", zap.String("url", url))
+		if defaultCreds, ok := s.DefaultCreds[resp.Request.URL.Host]; ok {
+			realm := resp.Header.Get("WWW-Authenticate")
+			if strings.HasPrefix(realm, "Basic") {
+				headers.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(defaultCreds.Username+":"+defaultCreds.Password)))
+				resp, err = proxy(url, method, headers)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if strings.HasPrefix(realm, "Bearer") {
+				params := make(map[string]string)
+				for _, param := range strings.Split(realm[len("Bearer"):], ",") {
+					tmp := strings.SplitN(strings.TrimSpace(param), "=", 2)
+					if len(tmp) != 2 {
+						continue
+					}
+					params[tmp[0]] = strings.Trim(tmp[1], "\"")
+				}
+				tokenUrl := params["realm"] + "?"
+				for k, v := range params {
+					tokenUrl += k + "=" + v + "&"
+				}
+				tokenUrl = tokenUrl[:len(tokenUrl)-1]
+
+				theaders := http.Header{
+					"Authorization": []string{"Basic " + base64.StdEncoding.EncodeToString([]byte(defaultCreds.Username+":"+defaultCreds.Password))},
+				}
+				tokenResp, err := proxy(tokenUrl, "GET", &theaders)
+				if err != nil {
+					return nil, err
+				}
+				body, err := io.ReadAll(tokenResp.Body)
+				if err != nil {
+					return nil, err
+				}
+				tokenResp.Body.Close()
+				data := map[string]string{}
+				json.Unmarshal(body, &data)
+				if data["token"] == "" {
+					return nil, errors.New("token not found in response")
+				}
+				headers.Set("Authorization", "Bearer "+data["token"])
+				resp, err = proxy(url, method, headers)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 
 	if resp.StatusCode/100 == 2 {

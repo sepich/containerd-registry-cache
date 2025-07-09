@@ -22,7 +22,7 @@ ls -lh /tmp/data/
 
 Challenge–response authentication flow:
 ```bash
-$ curl -i https://registry-1.docker.io/v2/library/alpine/manifests/latest
+$ curl -I https://registry-1.docker.io/v2/library/alpine/manifests/latest
 HTTP/1.1 401 Unauthorized
 www-authenticate: Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:library/alpine:pull"
 

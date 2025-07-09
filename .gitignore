@@ -1,1 +1,3 @@
-./containerd-registry-cache
+/.idea/
+/.vscode/
+/containerd-registry-cache
