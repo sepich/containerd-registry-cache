@@ -10,7 +10,7 @@ import (
 	"github.com/sepich/containerd-registry-cache/pkg/model"
 )
 
-// Type CacheWriter provides a facility to request a stream to write to the cache
+// CacheWriter provides a facility to request a stream to write to the cache
 type CacheWriter struct {
 	cacheDirectory string
 	Object         model.ObjectIdentifier

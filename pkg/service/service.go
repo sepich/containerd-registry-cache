@@ -36,13 +36,16 @@ type RegistryCreds struct {
 var client = &http.Client{}
 
 var cacheHits = promauto.NewCounter(prometheus.CounterOpts{
-	Name: "cache_hits",
+	Name:        "containerd_cache_total",
+	ConstLabels: map[string]string{"result": "hit"},
 })
 var cacheMisses = promauto.NewCounter(prometheus.CounterOpts{
-	Name: "cache_misses",
+	Name:        "containerd_cache_total",
+	ConstLabels: map[string]string{"result": "miss"},
 })
 var cacheMissByIgnore = promauto.NewCounter(prometheus.CounterOpts{
-	Name: "cache_miss_by_ignore",
+	Name:        "containerd_cache_total",
+	ConstLabels: map[string]string{"result": "skip"},
 })
 
 var pool = sync.Pool{
@@ -89,7 +92,6 @@ func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIden
 	w.Header().Add("X-Proxied-For", object.Registry)
 
 	cached, cacheWriter, err := s.Cache.GetCache(object)
-
 	if err != nil {
 		logger.Error("error getting from cache", zap.Error(err))
 		w.WriteHeader(500)
