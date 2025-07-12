@@ -92,13 +92,6 @@ func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIden
 	w.Header().Add("X-Proxied-By", "containerd-registry-cache")
 	w.Header().Add("X-Proxied-For", object.Registry)
 
-	cached, cacheWriter, err := s.Cache.GetCache(object)
-	if err != nil {
-		logger.Error("error getting from cache", zap.Error(err))
-		w.WriteHeader(500)
-		return
-	}
-
 	shouldSkipCache := false
 	// No point skipping blobs - the client either wants them or not.
 	// Unless there's heavy heavy blobs we shouldn't cache?
@@ -125,29 +118,41 @@ func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIden
 		}
 	}
 
+	var cacheWriter *cache.CacheWriter
 	if shouldSkipCache {
 		cacheMissByIgnore.Inc()
-	} else if cached != nil {
-		cacheHits.Inc()
-		logger.Info("Cache hit", zap.Any("cached", cached))
-
-		w.Header().Add("X-Proxy-Date", cached.CacheDate.String())
-		w.Header().Add("Age", strconv.Itoa(int(time.Since(cached.CacheDate).Seconds())))
-		w.Header().Add(model.HeaderContentLength, strconv.Itoa(int(cached.SizeBytes)))
-		w.Header().Add(model.HeaderContentType, cached.ContentType)
-		if cached.DockerContentDigest != "" {
-			w.Header().Add(model.HeaderDockerContentDigest, cached.DockerContentDigest)
+	} else {
+		var cached *cache.CachedObject
+		var err error
+		cached, cacheWriter, err = s.Cache.GetCache(object)
+		if err != nil {
+			logger.Error("error getting from cache", zap.Error(err))
+			w.WriteHeader(500)
+			return
 		}
 
-		reader, _ := cached.GetReader()
-		readIntoWriters(logger, []io.Writer{w}, reader)
-		reader.Close()
+		if cached != nil {
+			logger.Info("Cache hit", zap.Any("cached", cached))
+			cacheHits.Inc()
 
-		logger.Debug("Returning cache hit", zap.Any("headers", w.Header()))
-		return
-	} else {
+			w.Header().Add("X-Proxy-Date", cached.CacheDate.String())
+			w.Header().Add("Age", strconv.Itoa(int(time.Since(cached.CacheDate).Seconds())))
+			w.Header().Add(model.HeaderContentLength, strconv.Itoa(int(cached.SizeBytes)))
+			w.Header().Add(model.HeaderContentType, cached.ContentType)
+			if cached.DockerContentDigest != "" {
+				w.Header().Add(model.HeaderDockerContentDigest, cached.DockerContentDigest)
+			}
+
+			reader, _ := cached.GetReader()
+			readIntoWriters(logger, []io.Writer{w}, reader)
+			reader.Close()
+
+			logger.Debug("Returning cache hit", zap.Any("headers", w.Header()))
+			return
+		}
 		logger.Info("Cache miss")
 		cacheMisses.Inc()
+		headers.Del("Accept-Encoding") // will cache response for all, but some clients can dislike zstd/gzip, so cache as raw
 	}
 
 	url := "https://%s/v2/%s/blobs/%s"
@@ -179,13 +184,14 @@ func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIden
 	copyHeaders(w.Header(), upstreamResp.Header)
 	w.WriteHeader(upstreamResp.StatusCode)
 
-	writers := []io.Writer{cacheWriter}
-
+	writers := []io.Writer{}
+	if !shouldSkipCache {
+		writers = append(writers, cacheWriter)
+	}
 	var manifestBytes bytes.Buffer
 	if object.Type == model.ObjectTypeManifest {
 		writers = append(writers, &manifestBytes)
 	}
-
 	if !isHead {
 		writers = append(writers, w)
 	}
@@ -196,7 +202,9 @@ func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIden
 		logger.Debug("Upstream returned manifest", zap.ByteString("manifest", manifestBytes.Bytes()))
 	}
 
-	cacheWriter.Close(upstreamResp.Header.Get(model.HeaderContentType), upstreamResp.Header.Get(model.HeaderDockerContentDigest))
+	if !shouldSkipCache {
+		cacheWriter.Close(upstreamResp.Header.Get(model.HeaderContentType), upstreamResp.Header.Get(model.HeaderDockerContentDigest))
+	}
 }
 
 func readIntoWriters(logger *zap.Logger, dst []io.Writer, src io.Reader) error {
