@@ -185,12 +185,12 @@ func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIden
 	w.WriteHeader(upstreamResp.StatusCode)
 
 	writers := []io.Writer{}
+	var manifestBytes bytes.Buffer
 	if !shouldSkipCache {
 		writers = append(writers, cacheWriter)
-	}
-	var manifestBytes bytes.Buffer
-	if object.Type == model.ObjectTypeManifest {
-		writers = append(writers, &manifestBytes)
+		if object.Type == model.ObjectTypeManifest {
+			writers = append(writers, &manifestBytes)
+		}
 	}
 	if !isHead {
 		writers = append(writers, w)
@@ -198,11 +198,10 @@ func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIden
 
 	readIntoWriters(logger, writers, upstreamResp.Body)
 
-	if object.Type == model.ObjectTypeManifest {
-		logger.Debug("Upstream returned manifest", zap.ByteString("manifest", manifestBytes.Bytes()))
-	}
-
 	if !shouldSkipCache {
+		if object.Type == model.ObjectTypeManifest {
+			logger.Debug("Upstream returned manifest", zap.ByteString("manifest", manifestBytes.Bytes()))
+		}
 		cacheWriter.Close(upstreamResp.Header.Get(model.HeaderContentType), upstreamResp.Header.Get(model.HeaderDockerContentDigest))
 	}
 }
