@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -19,8 +20,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/sepich/containerd-registry-cache/pkg/cache"
 	"github.com/sepich/containerd-registry-cache/pkg/model"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 type Service interface {
@@ -66,9 +65,10 @@ type CacheService struct {
 var _ Service = &CacheService{}
 
 func (s *CacheService) GetManifest(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
-	logger := zap.L().With(zap.Any("object", object))
-	if logger.Level().Enabled(zapcore.DebugLevel) {
-		logger.Info("GetManifest", zap.Any("headers", headers))
+	logger := slog.Default().With("object", object)
+	if logger.Enabled(context.Background(), slog.LevelDebug) {
+		logger.Info("GetManifest",
+			"headers", headers)
 	} else {
 		logger.Info("GetManifest")
 	}
@@ -77,9 +77,10 @@ func (s *CacheService) GetManifest(object *model.ObjectIdentifier, isHead bool, 
 }
 
 func (s *CacheService) GetBlob(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
-	logger := zap.L().With(zap.Any("object", object))
-	if logger.Level().Enabled(zapcore.DebugLevel) {
-		logger.Info("GetBlob", zap.Any("headers", headers))
+	logger := slog.Default().With("object", object)
+	if logger.Enabled(context.Background(), slog.LevelDebug) {
+		logger.Info("GetBlob",
+			"headers", headers)
 	} else {
 		logger.Info("GetBlob")
 	}
@@ -87,13 +88,14 @@ func (s *CacheService) GetBlob(object *model.ObjectIdentifier, isHead bool, head
 	s.cacheOrProxy(logger, object, isHead, headers, w)
 }
 
-func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
+func (s *CacheService) cacheOrProxy(logger *slog.Logger, object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
 	w.Header().Add("X-Proxied-By", "containerd-registry-cache")
 	w.Header().Add("X-Proxied-For", object.Registry)
 
 	cached, cacheWriter, err := s.Cache.GetCache(object)
 	if err != nil {
-		logger.Error("error getting from cache", zap.Error(err))
+		logger.Error("error getting from cache",
+			"error", err)
 		w.WriteHeader(500)
 		return
 	}
@@ -122,7 +124,8 @@ func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIden
 		cacheMissByIgnore.Inc()
 	} else if cached != nil {
 		cacheHits.Inc()
-		logger.Info("Cache hit", zap.Any("cached", cached))
+		logger.Info("Cache hit",
+			"cached", cached)
 
 		w.Header().Add("X-Proxy-Date", cached.CacheDate.String())
 		w.Header().Add("Age", strconv.Itoa(int(time.Since(cached.CacheDate).Seconds())))
@@ -136,7 +139,8 @@ func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIden
 		readIntoWriters(logger, []io.Writer{w}, reader)
 		reader.Close()
 
-		logger.Debug("Returning cache hit", zap.Any("headers", w.Header()))
+		logger.Debug("Returning cache hit",
+			"headers", w.Header())
 		return
 	} else {
 		logger.Info("Cache miss")
@@ -150,7 +154,8 @@ func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIden
 
 	upstreamResp, err := s.proxySuccessOrError(fmt.Sprintf(url, object.Registry, object.Repository, object.Ref), "GET", headers)
 	if err != nil {
-		logger.Error("cacheOrProxy err", zap.Error(err))
+		logger.Error("cacheOrProxy err",
+			"error", err)
 		// If it's a non-200 status from upstream then just pass it through
 		// This should handle 404s and 401s to request auth
 		if errors.Is(err, &Non200Error{}) {
@@ -166,7 +171,9 @@ func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIden
 		}
 		return
 	}
-	logger.Debug("Got upstream response", zap.Int("status", upstreamResp.StatusCode), zap.Any("headers", upstreamResp.Header))
+	logger.Debug("Got upstream response",
+		"status", upstreamResp.StatusCode,
+		"headers", upstreamResp.Header)
 	defer upstreamResp.Body.Close()
 
 	copyHeaders(w.Header(), upstreamResp.Header)
@@ -186,13 +193,14 @@ func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIden
 	readIntoWriters(logger, writers, upstreamResp.Body)
 
 	if object.Type == model.ObjectTypeManifest {
-		logger.Debug("Upstream returned manifest", zap.ByteString("manifest", manifestBytes.Bytes()))
+		logger.Debug("Upstream returned manifest",
+			"manifest", manifestBytes.Bytes())
 	}
 
 	cacheWriter.Close(upstreamResp.Header.Get(model.HeaderContentType), upstreamResp.Header.Get(model.HeaderDockerContentDigest))
 }
 
-func readIntoWriters(logger *zap.Logger, dst []io.Writer, src io.Reader) error {
+func readIntoWriters(logger *slog.Logger, dst []io.Writer, src io.Reader) error {
 	buf := *pool.Get().(*[]byte)
 	defer pool.Put(&buf)
 
@@ -200,7 +208,8 @@ func readIntoWriters(logger *zap.Logger, dst []io.Writer, src io.Reader) error {
 		read, rerr := src.Read(buf)
 		if rerr != nil && rerr != io.EOF {
 			err := fmt.Errorf("read error during copy: %w", rerr)
-			logger.Error("", zap.Error(err))
+			logger.Error("error",
+				"error", err)
 			return err
 		}
 		if read > 0 {
@@ -211,7 +220,8 @@ func readIntoWriters(logger *zap.Logger, dst []io.Writer, src io.Reader) error {
 				}
 				if werr != nil {
 					err := fmt.Errorf("write error during copy: %w", rerr)
-					logger.Error("", zap.Error(err))
+					logger.Error("error",
+						"error", err)
 					return err
 				}
 			}
@@ -241,7 +251,8 @@ func (s *CacheService) proxySuccessOrError(url, method string, headers *http.Hea
 
 	// retry once with default creds if none provided
 	if resp.StatusCode == 401 && headers.Get("Authorization") == "" {
-		zap.L().Debug("Received 401, retrying with default credentials", zap.String("url", url))
+		slog.Default().Debug("Received 401, retrying with default credentials",
+			"url", url)
 		if defaultCreds, ok := s.DefaultCreds[resp.Request.URL.Host]; ok {
 			realm := resp.Header.Get("WWW-Authenticate")
 			if strings.HasPrefix(realm, "Basic") {

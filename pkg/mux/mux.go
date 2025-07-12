@@ -1,13 +1,13 @@
 package mux
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sepich/containerd-registry-cache/pkg/model"
 	"github.com/sepich/containerd-registry-cache/pkg/service"
-	"go.uber.org/zap"
 )
 
 // Based off the result of remoteName from https://github.com/distribution/distribution's regexp.go
@@ -27,7 +27,7 @@ func NewRouter(services service.Service) *mux.Router {
 	})
 
 	r.HandleFunc("/v2/{repo:"+imageNamePattern+"}/manifests/{ref}", func(w http.ResponseWriter, r *http.Request) {
-		logger := zap.L()
+		logger := slog.Default()
 
 		vars := mux.Vars(r)
 		repo := vars["repo"]
@@ -36,12 +36,15 @@ func NewRouter(services service.Service) *mux.Router {
 		if registry == "" {
 			w.WriteHeader(400)
 			w.Write([]byte("No ns query string given (are you using containerd?): I don't know what registry to ask for " + repo))
-			logger.Warn("Request had no ns query string, not sure what registry this is for", zap.String("repo", repo))
+			logger.Warn("Request had no ns query string, not sure what registry this is for",
+				"repo", repo)
 			return
 		}
 
 		if registryOverride, ok := registryOverrides[registry]; ok {
-			logger.Debug("Replacing registry", zap.String("registry", registry), zap.String("registryOverride", registryOverride))
+			logger.Debug("Replacing registry",
+				"registry", registry,
+				"registryOverride", registryOverride)
 			registry = registryOverride
 		}
 
@@ -64,7 +67,7 @@ func NewRouter(services service.Service) *mux.Router {
 
 	// I assume registries ensure a form of SHA hash here, but let's not care about that.
 	r.HandleFunc("/v2/{repo:"+imageNamePattern+"}/blobs/{digest}", func(w http.ResponseWriter, r *http.Request) {
-		logger := zap.L()
+		logger := slog.Default()
 
 		vars := mux.Vars(r)
 		repo := vars["repo"]
@@ -74,12 +77,15 @@ func NewRouter(services service.Service) *mux.Router {
 			w.WriteHeader(400)
 			w.Write([]byte("No ns query string given (are you using containerd?): I don't know what registry to ask for " + repo))
 
-			logger.Warn("Request had no ns query string, not sure what registry this is for", zap.String("repo", repo))
+			logger.Warn("Request had no ns query string, not sure what registry this is for",
+				"repo", repo)
 			return
 		}
 
 		if registryOverride, ok := registryOverrides[registry]; ok {
-			logger.Debug("Replacing registry", zap.String("registry", registry), zap.String("registryOverride", registryOverride))
+			logger.Debug("Replacing registry",
+				"registry", registry,
+				"registryOverride", registryOverride)
 			registry = registryOverride
 		}
 
