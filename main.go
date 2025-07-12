@@ -42,6 +42,7 @@ func main() {
 	var port = pflag.IntP("port", "p", 3000, "Port to listen on")
 	var ignoreTags = pflag.StringP("ignore", "i", "latest", "RegEx of tags to ignore caching")
 	var cacheManifests = pflag.BoolP("cache-manifests", "m", true, "Cache manifests")
+	var privReg = pflag.StringArrayP("private-registry", "", []string{}, "Private registry to skip Manfest caching for, can be specified multiple times")
 	var ver = pflag.BoolP("version", "v", false, "Show version and exit")
 	pflag.Parse()
 	if *ver {
@@ -82,12 +83,18 @@ func main() {
 		}
 		logger.Info("Loaded default credentials", zap.Int("registries", len(defaultCreds)))
 	}
+	privateRegistries := make(map[string]bool)
+	for _, reg := range *privReg {
+		privateRegistries[reg] = true
+	}
+	logger.Info("Private registry configured", zap.Int("registries", len(*privReg)))
 
 	router := mux.NewRouter(&service.CacheService{
-		Cache:          &cache,
-		IgnoredTags:    regexp.MustCompile(*ignoreTags),
-		DefaultCreds:   defaultCreds,
-		CacheManifests: *cacheManifests,
+		Cache:             &cache,
+		IgnoredTags:       regexp.MustCompile(*ignoreTags),
+		DefaultCreds:      defaultCreds,
+		CacheManifests:    *cacheManifests,
+		PrivateRegistries: privateRegistries,
 	})
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		logRequest(r)

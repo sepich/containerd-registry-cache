@@ -56,11 +56,12 @@ var pool = sync.Pool{
 }
 
 type CacheService struct {
-	Cache          cache.CachingService
-	IgnoredImages  map[string]struct{}
-	IgnoredTags    *regexp.Regexp
-	DefaultCreds   map[string]RegistryCreds
-	CacheManifests bool
+	Cache             cache.CachingService
+	IgnoredImages     map[string]struct{}
+	IgnoredTags       *regexp.Regexp
+	DefaultCreds      map[string]RegistryCreds
+	CacheManifests    bool
+	PrivateRegistries map[string]bool
 }
 
 var _ Service = &CacheService{}
@@ -109,6 +110,12 @@ func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIden
 		if s.IgnoredTags != nil {
 			if s.IgnoredTags.MatchString(object.Ref) {
 				logger.Info("Skipping tag due to match ignore regex")
+				shouldSkipCache = true
+			}
+		}
+		if s.PrivateRegistries != nil {
+			if _, isPrivate := s.PrivateRegistries[object.Registry]; isPrivate {
+				logger.Info("Skipping as private registry")
 				shouldSkipCache = true
 			}
 		}
@@ -241,8 +248,8 @@ func (s *CacheService) proxySuccessOrError(url, method string, headers *http.Hea
 
 	// retry once with default creds if none provided
 	if resp.StatusCode == 401 && headers.Get("Authorization") == "" {
-		zap.L().Debug("Received 401, retrying with default credentials", zap.String("url", url))
 		if defaultCreds, ok := s.DefaultCreds[resp.Request.URL.Host]; ok {
+			zap.L().Debug("Received 401, retrying with default credentials", zap.String("url", url))
 			realm := resp.Header.Get("WWW-Authenticate")
 			if strings.HasPrefix(realm, "Basic") {
 				headers.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(defaultCreds.Username+":"+defaultCreds.Password)))
@@ -279,10 +286,7 @@ func (s *CacheService) proxySuccessOrError(url, method string, headers *http.Hea
 				}
 				tokenResp.Body.Close()
 				data := map[string]string{}
-				err = json.Unmarshal(body, &data)
-				if err != nil {
-					return nil, err
-				}
+				json.Unmarshal(body, &data) // only parse strings, skip ints
 				if data["token"] == "" {
 					return nil, errors.New("token not found in response")
 				}
