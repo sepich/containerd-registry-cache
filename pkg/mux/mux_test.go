@@ -1,21 +1,22 @@
 package mux
 
 import (
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/sepich/containerd-registry-cache/pkg/model"
+	"github.com/sepich/containerd-registry-cache/pkg/service"
 	"github.com/stretchr/testify/assert"
 )
 
 type noOpService struct{}
 
-func (s *noOpService) GetManifest(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
-	w.Write([]byte("{}"))
-}
-func (s *noOpService) GetBlob(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
+var _ service.Service = &noOpService{}
+
+func (s *noOpService) GetObject(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter, logger *slog.Logger) {
 }
 
 func TestManifestsPaths(t *testing.T) {
@@ -53,7 +54,7 @@ func TestManifestsPaths(t *testing.T) {
 		},
 	}
 
-	r := NewRouter(&noOpService{})
+	r := NewRouter(&noOpService{}, slog.Default())
 
 	for _, tC := range testCases {
 		t.Run(strings.ReplaceAll(tC.url, "/", "-"), func(t *testing.T) {
@@ -104,7 +105,7 @@ func TestBlobPaths(t *testing.T) {
 		},
 	}
 
-	r := NewRouter(&noOpService{})
+	r := NewRouter(&noOpService{}, slog.Default())
 
 	for _, tC := range testCases {
 		t.Run(strings.ReplaceAll(tC.url, "/", "-"), func(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -19,13 +20,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/sepich/containerd-registry-cache/pkg/cache"
 	"github.com/sepich/containerd-registry-cache/pkg/model"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 type Service interface {
-	GetManifest(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter)
-	GetBlob(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter)
+	GetObject(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter, logger *slog.Logger)
 }
 
 type RegistryCreds struct {
@@ -43,7 +41,7 @@ var cacheMisses = promauto.NewCounter(prometheus.CounterOpts{
 	Name:        "containerd_cache_total",
 	ConstLabels: map[string]string{"result": "miss"},
 })
-var cacheMissByIgnore = promauto.NewCounter(prometheus.CounterOpts{
+var cacheSkips = promauto.NewCounter(prometheus.CounterOpts{
 	Name:        "containerd_cache_total",
 	ConstLabels: map[string]string{"result": "skip"},
 })
@@ -57,8 +55,8 @@ var pool = sync.Pool{
 
 type CacheService struct {
 	Cache             cache.CachingService
-	IgnoredImages     map[string]struct{}
-	IgnoredTags       *regexp.Regexp
+	SkipImages        map[string]struct{}
+	SkipTags          *regexp.Regexp
 	DefaultCreds      map[string]RegistryCreds
 	CacheManifests    bool
 	PrivateRegistries map[string]bool
@@ -66,73 +64,24 @@ type CacheService struct {
 
 var _ Service = &CacheService{}
 
-func (s *CacheService) GetManifest(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
-	logger := zap.L().With(zap.Any("object", object))
-	if logger.Level().Enabled(zapcore.DebugLevel) {
-		logger.Info("GetManifest", zap.Any("headers", headers))
-	} else {
-		logger.Info("GetManifest")
-	}
-
-	s.cacheOrProxy(logger, object, isHead, headers, w)
-}
-
-func (s *CacheService) GetBlob(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
-	logger := zap.L().With(zap.Any("object", object))
-	if logger.Level().Enabled(zapcore.DebugLevel) {
-		logger.Info("GetBlob", zap.Any("headers", headers))
-	} else {
-		logger.Info("GetBlob")
-	}
-
-	s.cacheOrProxy(logger, object, isHead, headers, w)
-}
-
-func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter) {
+func (s *CacheService) GetObject(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter, logger *slog.Logger) {
 	w.Header().Add("X-Proxied-By", "containerd-registry-cache")
 	w.Header().Add("X-Proxied-For", object.Registry)
 
-	shouldSkipCache := false
-	// No point skipping blobs - the client either wants them or not.
-	// Unless there's heavy heavy blobs we shouldn't cache?
-	if object.Type == model.ObjectTypeManifest {
-		if !s.CacheManifests {
-			logger.Info("Skipping manifest due to cache manifests disabled")
-			shouldSkipCache = true
-		}
-		if s.IgnoredTags != nil {
-			if s.IgnoredTags.MatchString(object.Ref) {
-				logger.Info("Skipping tag due to match ignore regex")
-				shouldSkipCache = true
-			}
-		}
-		if s.PrivateRegistries != nil {
-			if _, isPrivate := s.PrivateRegistries[object.Registry]; isPrivate {
-				logger.Info("Skipping as private registry")
-				shouldSkipCache = true
-			}
-		}
-		if _, ignoredImage := s.IgnoredImages[object.Repository]; ignoredImage {
-			logger.Info("Skipping image due to being on ignore list")
-			shouldSkipCache = true
-		}
-	}
-
+	skipCacheReason := s.getSkipReason(object)
 	var cacheWriter *cache.CacheWriter
-	if shouldSkipCache {
-		cacheMissByIgnore.Inc()
-	} else {
+	if skipCacheReason == "" {
 		var cached *cache.CachedObject
 		var err error
 		cached, cacheWriter, err = s.Cache.GetCache(object)
 		if err != nil {
-			logger.Error("error getting from cache", zap.Error(err))
+			logger.Error("error getting from cache", "error", err)
 			w.WriteHeader(500)
 			return
 		}
 
 		if cached != nil {
-			logger.Info("Cache hit", zap.Any("cached", cached))
+			logger.Info("Served from cache", "cache", "hit", "cached", cached)
 			cacheHits.Inc()
 
 			w.Header().Add("X-Proxy-Date", cached.CacheDate.String())
@@ -142,16 +91,16 @@ func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIden
 			if cached.DockerContentDigest != "" {
 				w.Header().Add(model.HeaderDockerContentDigest, cached.DockerContentDigest)
 			}
+			logger.Debug("Client response", "headers", w.Header())
 
 			reader, _ := cached.GetReader()
-			readIntoWriters(logger, []io.Writer{w}, reader)
+			if err = readIntoWriters([]io.Writer{w}, reader); err != nil {
+				logger.Error("Error reading from cache", "error", err)
+				return
+			}
 			reader.Close()
-
-			logger.Debug("Returning cache hit", zap.Any("headers", w.Header()))
 			return
 		}
-		logger.Info("Cache miss")
-		cacheMisses.Inc()
 		// will cache response for all, but some clients can dislike zstd/gzip, so cache as raw full-range
 		headers.Del("Accept-Encoding")
 		headers.Del("Range")
@@ -162,62 +111,87 @@ func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIden
 		url = "https://%s/v2/%s/manifests/%s"
 	}
 
-	upstreamResp, err := s.proxySuccessOrError(fmt.Sprintf(url, object.Registry, object.Repository, object.Ref), "GET", headers)
+	upstreamResp, err := s.reqWithCreds(fmt.Sprintf(url, object.Registry, object.Repository, object.Ref), "GET", headers, &logger)
 	if err != nil {
-		logger.Error("cacheOrProxy err", zap.Error(err))
-		// If it's a non-200 status from upstream then just pass it through
-		// This should handle 404s and 401s to request auth
-		if errors.Is(err, &Non200Error{}) {
-			copyHeaders(w.Header(), upstreamResp.Header)
-			w.WriteHeader(upstreamResp.StatusCode)
-
-			if !isHead {
-				readIntoWriters(logger, []io.Writer{w}, upstreamResp.Body)
-			}
-			upstreamResp.Body.Close()
-		} else {
-			w.WriteHeader(500)
-		}
+		logger.Error("Error proxying request", "error", err)
+		w.WriteHeader(500)
 		return
 	}
-	logger.Debug("Got upstream response", zap.Int("status", upstreamResp.StatusCode), zap.Any("headers", upstreamResp.Header))
 	defer upstreamResp.Body.Close()
 
+	logger.Debug("Upstream response", "status", upstreamResp.StatusCode, "headers", upstreamResp.Header)
 	copyHeaders(w.Header(), upstreamResp.Header)
 	w.WriteHeader(upstreamResp.StatusCode)
+	// If it's a non-200 status from upstream then don't cache
+	// This should handle 404s and 401s to request auth
+	if upstreamResp.StatusCode/100 != 2 {
+		skipCacheReason = "non-2xx upstream response"
+	}
 
 	writers := []io.Writer{}
 	var manifestBytes bytes.Buffer
-	if !shouldSkipCache {
+	if skipCacheReason == "" {
+		logger = logger.With("cache", "miss")
+		cacheMisses.Inc()
 		writers = append(writers, cacheWriter)
 		if object.Type == model.ObjectTypeManifest {
 			writers = append(writers, &manifestBytes)
 		}
+	} else {
+		logger = logger.With("cache", "skip", "reason", skipCacheReason)
+		cacheSkips.Inc()
 	}
 	if !isHead {
 		writers = append(writers, w)
 	}
 
-	readIntoWriters(logger, writers, upstreamResp.Body)
+	err = readIntoWriters(writers, upstreamResp.Body)
+	if err != nil {
+		logger.Error("Error reading upstream response body", "error", err)
+		return // don't cache on error
+	}
 
-	if !shouldSkipCache {
+	if skipCacheReason == "" {
 		if object.Type == model.ObjectTypeManifest {
-			logger.Debug("Upstream returned manifest", zap.ByteString("manifest", manifestBytes.Bytes()))
+			logger.Debug("Upstream returned manifest", "manifest", manifestBytes.Bytes())
 		}
 		cacheWriter.Close(upstreamResp.Header.Get(model.HeaderContentType), upstreamResp.Header.Get(model.HeaderDockerContentDigest))
 	}
+	logger.Info("Served from upstream", "status", upstreamResp.StatusCode)
 }
 
-func readIntoWriters(logger *zap.Logger, dst []io.Writer, src io.Reader) error {
+func (s *CacheService) getSkipReason(object *model.ObjectIdentifier) (res string) {
+	// No point skipping blobs - the client either wants them or not.
+	// Unless there's heavy heavy blobs we shouldn't cache?
+	if object.Type == model.ObjectTypeManifest {
+		if !s.CacheManifests {
+			res = "manifests cache disabled"
+		}
+		if s.SkipTags != nil {
+			if s.SkipTags.MatchString(object.Ref) {
+				res = "tag match skip regex"
+			}
+		}
+		if s.PrivateRegistries != nil {
+			if _, isPrivate := s.PrivateRegistries[object.Registry]; isPrivate {
+				res = "private registry"
+			}
+		}
+		if _, ignoredImage := s.SkipImages[object.Repository]; ignoredImage {
+			res = "image on ignore list"
+		}
+	}
+	return res
+}
+
+func readIntoWriters(dst []io.Writer, src io.Reader) error {
 	buf := *pool.Get().(*[]byte)
 	defer pool.Put(&buf)
 
 	for {
 		read, rerr := src.Read(buf)
 		if rerr != nil && rerr != io.EOF {
-			err := fmt.Errorf("read error during copy: %w", rerr)
-			logger.Error("", zap.Error(err))
-			return err
+			return fmt.Errorf("read error during copy: %w", rerr)
 		}
 		if read > 0 {
 			for _, v := range dst {
@@ -226,9 +200,7 @@ func readIntoWriters(logger *zap.Logger, dst []io.Writer, src io.Reader) error {
 					werr = io.ErrShortWrite
 				}
 				if werr != nil {
-					err := fmt.Errorf("write error during copy: %w", rerr)
-					logger.Error("", zap.Error(err))
-					return err
+					return fmt.Errorf("write error during copy: %w", rerr)
 				}
 			}
 		}
@@ -249,8 +221,8 @@ func copyHeaders(dst, src http.Header) {
 	}
 }
 
-func (s *CacheService) proxySuccessOrError(url, method string, headers *http.Header) (*http.Response, error) {
-	resp, err := proxy(url, method, headers)
+func (s *CacheService) reqWithCreds(url, method string, headers *http.Header, l **slog.Logger) (*http.Response, error) {
+	resp, err := request(url, method, headers)
 	if err != nil {
 		return nil, err
 	}
@@ -258,11 +230,12 @@ func (s *CacheService) proxySuccessOrError(url, method string, headers *http.Hea
 	// retry once with default creds if none provided
 	if resp.StatusCode == 401 && headers.Get("Authorization") == "" {
 		if defaultCreds, ok := s.DefaultCreds[resp.Request.URL.Host]; ok {
-			zap.L().Debug("Received 401, retrying with default credentials", zap.String("url", url))
+			(*l).Debug("Received 401, retrying with default credentials", "url", url)
+			*l = (*l).With("creds", defaultCreds.Username+"@"+resp.Request.URL.Host)
 			realm := resp.Header.Get("WWW-Authenticate")
 			if strings.HasPrefix(realm, "Basic") {
 				headers.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(defaultCreds.Username+":"+defaultCreds.Password)))
-				resp, err = proxy(url, method, headers)
+				resp, err = request(url, method, headers)
 				if err != nil {
 					return nil, err
 				}
@@ -285,7 +258,7 @@ func (s *CacheService) proxySuccessOrError(url, method string, headers *http.Hea
 				theaders := http.Header{
 					"Authorization": []string{"Basic " + base64.StdEncoding.EncodeToString([]byte(defaultCreds.Username+":"+defaultCreds.Password))},
 				}
-				tokenResp, err := proxy(tokenUrl, "GET", &theaders)
+				tokenResp, err := request(tokenUrl, "GET", &theaders)
 				if err != nil {
 					return nil, err
 				}
@@ -295,35 +268,28 @@ func (s *CacheService) proxySuccessOrError(url, method string, headers *http.Hea
 				}
 				tokenResp.Body.Close()
 				data := map[string]string{}
-				json.Unmarshal(body, &data) // only parse strings, skip ints
+				json.Unmarshal(body, &data) // only parse out strings, skip ints
 				if data["token"] == "" {
 					return nil, errors.New("token not found in response")
 				}
 				headers.Set("Authorization", "Bearer "+data["token"])
-				resp, err = proxy(url, method, headers)
+				resp, err = request(url, method, headers)
 				if err != nil {
 					return nil, err
 				}
 			}
 		}
 	}
-
-	if resp.StatusCode/100 == 2 {
-		return resp, err
-	} else {
-		return resp, &Non200Error{Code: resp.StatusCode}
-	}
+	return resp, err
 }
 
-func proxy(url, method string, headers *http.Header) (*http.Response, error) {
+func request(url, method string, headers *http.Header) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(context.TODO(), method, url, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	// Copy headers such as Accept and Authorization, are there any we want to skip?
 	copyHeaders(req.Header, *headers)
-
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

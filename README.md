@@ -27,16 +27,18 @@ A pull-through registry cache for `containerd` intended for Kubernetes clusters.
 - In case `localhost:30123` is not available, `containerd` falls back to the original registry
 
 ### How to run
-Available as a docker image on dockerhub: https://hub.docker.com/r/sepa/containerd-registry-cache
+Available as a docker image: https://hub.docker.com/r/sepa/containerd-registry-cache
 ```bash
 $ docker run sepa/containerd-registry-cache -h
 Usage of ./containerd-registry-cache:
-  -d, --cache-dir string    Cache directory (default "/tmp/data")
-  -m, --cache-manifests     Cache manifests (default true)
-  -f, --creds-file string   Default credentials to use for registries
-  -i, --ignore string       RegEx of tags to ignore caching (default "latest")
-  -p, --port int            Port to listen on (default 3000)
-  -v, --version             Show version and exit
+  -d, --cache-dir string               Cache directory (default "/tmp/data")
+  -m, --cache-manifests                Cache manifests (default true)
+  -f, --creds-file string              Default credentials file to use for registries
+  -l, --log-level string               Log level to use (debug, info) (default "info")
+  -p, --port int                       Port to listen on (default 3000)
+      --private-registry stringArray   Private registry to skip Manifest caching for, can be specified multiple times
+  -t, --skip-tags string               RegEx of image tags to skip caching (default "latest")
+  -v, --version                        Show version and exit
 ```
 Run it as: 
 - `Nodeport` service. This way you can access it from any node on `localhost:<port>`, but only after CNI is started. 
@@ -46,6 +48,7 @@ Run it as:
 - Cache volume data could be cleaned up at any time. There is no expiration and built-in auto cleaning. You can implement any cleanup policy via sidecar and `find -del` 
 - By default, both Blobs and Manifests (excluding `:latest`) are cached. You can disable Manifests caching altogether (`--cache-manifests=no`), to always re-query all tags (like mutable `:3`, `:3.1`, with immutable `:3.1.2`)
 - Pulls for cached private Manifests require no auth. Use with care for private registries!
+You can specify such registries as `--private-registry` to skip Manifest caching and only cache Blobs. Still, one can download such private Blob from the cache knowing its sha256 without auth.
 - You can use "default credentials" `--creds-file` to avoid dockerHub unauthenticated rate limits for example. File is `yaml` with section names equal to corresponding registry hosts:
   ```yaml
   registry-1.docker.io:
@@ -57,16 +60,15 @@ Run it as:
   ```
 - Prometheus metrics are available at the same `--port` on `/metrics` endpoint:
   ```ini
-  containerd_cache_total{result="hit"}
-  containerd_cache_total{result="miss"}
-  containerd_cache_total{result="skip"}
+  containerd_cache_total{result="hit"}  # served from cache 
+  containerd_cache_total{result="miss"} # saved to cache
+  containerd_cache_total{result="skip"} # not saved to cache due to `--skip-tags` or `--cache-manifests=no`
   ```
-  where `skip` shows number of requests bypassed cache due to `--ignore` or `--cache-manifests=no`
 
 ### TODO
 - Blobs are cached with no separation of registries "content-addressable storage", so layer space should be reused
 - S3 mode
-- lock on caching the same uri?
+- lock on caching of the same uri?
 - verify content digest before caching
 
 ### How to test locally

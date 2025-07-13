@@ -1,13 +1,14 @@
 package mux
 
 import (
+	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sepich/containerd-registry-cache/pkg/model"
 	"github.com/sepich/containerd-registry-cache/pkg/service"
-	"go.uber.org/zap"
 )
 
 // Based off the result of remoteName from https://github.com/distribution/distribution's regexp.go
@@ -17,7 +18,7 @@ var registryOverrides = map[string]string{
 	"docker.io": "registry-1.docker.io",
 }
 
-func NewRouter(services service.Service) *mux.Router {
+func NewRouter(s service.Service, logger *slog.Logger) *mux.Router {
 	r := mux.NewRouter()
 
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -27,80 +28,54 @@ func NewRouter(services service.Service) *mux.Router {
 	})
 
 	r.HandleFunc("/v2/{repo:"+imageNamePattern+"}/manifests/{ref}", func(w http.ResponseWriter, r *http.Request) {
-		logger := zap.L()
-
 		vars := mux.Vars(r)
-		repo := vars["repo"]
-		registry := r.URL.Query().Get("ns")
-
-		if registry == "" {
-			w.WriteHeader(400)
-			w.Write([]byte("No ns query string given (are you using containerd?): I don't know what registry to ask for " + repo))
-			logger.Warn("Request had no ns query string, not sure what registry this is for", zap.String("repo", repo))
-			return
-		}
-
-		if registryOverride, ok := registryOverrides[registry]; ok {
-			logger.Debug("Replacing registry", zap.String("registry", registry), zap.String("registryOverride", registryOverride))
-			registry = registryOverride
-		}
-
-		isHead := false
-		if r.Method == "HEAD" {
-			isHead = true
-		} else if r.Method != "GET" {
-			// No method
-		}
-
-		object := &model.ObjectIdentifier{
-			Registry:   registry,
-			Repository: repo,
-			Ref:        vars["ref"],
-			Type:       model.ObjectTypeManifest,
-		}
-
-		services.GetManifest(object, isHead, &r.Header, w)
+		handleService(s, vars, model.ObjectTypeManifest, r, w, logger)
 	})
 
-	// I assume registries ensure a form of SHA hash here, but let's not care about that.
-	r.HandleFunc("/v2/{repo:"+imageNamePattern+"}/blobs/{digest}", func(w http.ResponseWriter, r *http.Request) {
-		logger := zap.L()
-
+	r.HandleFunc("/v2/{repo:"+imageNamePattern+"}/blobs/{ref}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
-		repo := vars["repo"]
-		registry := r.URL.Query().Get("ns")
-
-		if registry == "" {
-			w.WriteHeader(400)
-			w.Write([]byte("No ns query string given (are you using containerd?): I don't know what registry to ask for " + repo))
-
-			logger.Warn("Request had no ns query string, not sure what registry this is for", zap.String("repo", repo))
-			return
-		}
-
-		if registryOverride, ok := registryOverrides[registry]; ok {
-			logger.Debug("Replacing registry", zap.String("registry", registry), zap.String("registryOverride", registryOverride))
-			registry = registryOverride
-		}
-
-		isHead := false
-		if r.Method == "HEAD" {
-			isHead = true
-		} else if r.Method != "GET" {
-			// No method
-		}
-
-		object := &model.ObjectIdentifier{
-			Registry:   registry,
-			Repository: repo,
-			Ref:        vars["digest"],
-			Type:       model.ObjectTypeBlob,
-		}
-
-		services.GetBlob(object, isHead, &r.Header, w)
+		handleService(s, vars, model.ObjectTypeBlob, r, w, logger)
 	})
 
 	r.Handle("/metrics", promhttp.Handler())
 
 	return r
+}
+
+func handleService(s service.Service, vars map[string]string, t model.ObjectType, r *http.Request, w http.ResponseWriter, logger *slog.Logger) {
+	repo := vars["repo"]
+	registry := r.URL.Query().Get("ns")
+	ip := r.RemoteAddr
+	if i := strings.LastIndex(r.RemoteAddr, ":"); i != -1 {
+		ip = r.RemoteAddr[:i]
+	}
+	logger = logger.With("method", r.Method, "uri", r.RequestURI, "addr", ip, "request_id", r.Header.Get("X-Request-ID"))
+
+	if registry == "" {
+		w.WriteHeader(400)
+		w.Write([]byte("No `ns` query string found (are you using containerd?): I don't know what registry to ask for " + repo))
+		logger.Warn("Request had no `ns` query string, not sure what registry this is for", "host", r.Host, "headers", r.Header)
+		return
+	}
+
+	if registryOverride, ok := registryOverrides[registry]; ok {
+		registry = registryOverride
+	}
+
+	isHead := false
+	if r.Method == "HEAD" {
+		isHead = true
+	} else if r.Method != "GET" {
+		w.WriteHeader(400)
+		logger.Warn("Method is not supported", "host", r.Host, "headers", r.Header)
+		return
+	}
+
+	object := &model.ObjectIdentifier{
+		Registry:   registry,
+		Repository: repo,
+		Ref:        vars["ref"],
+		Type:       t,
+	}
+	s.GetObject(object, isHead, &r.Header, w, logger)
 }
