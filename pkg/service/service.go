@@ -152,7 +152,9 @@ func (s *CacheService) cacheOrProxy(logger *zap.Logger, object *model.ObjectIden
 		}
 		logger.Info("Cache miss")
 		cacheMisses.Inc()
-		headers.Del("Accept-Encoding") // will cache response for all, but some clients can dislike zstd/gzip, so cache as raw
+		// will cache response for all, but some clients can dislike zstd/gzip, so cache as raw full-range
+		headers.Del("Accept-Encoding")
+		headers.Del("Range")
 	}
 
 	url := "https://%s/v2/%s/blobs/%s"

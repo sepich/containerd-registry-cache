@@ -66,8 +66,8 @@ Run it as:
 ### TODO
 - Blobs are cached with no separation of registries "content-addressable storage", so layer space should be reused
 - S3 mode
-- Disable Manifest cache for private registry only
-- Block `Range` header in upstream requests?
+- lock on caching the same uri?
+- verify content digest before caching
 
 ### How to test locally
 Docker distribution [API spec](https://distribution.github.io/distribution/spec/api/) example:
