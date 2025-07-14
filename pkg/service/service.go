@@ -31,7 +31,15 @@ type RegistryCreds struct {
 	Password string `json:"password"`
 }
 
-var client = &http.Client{}
+var client = &http.Client{
+	Transport: &http.Transport{
+		IdleConnTimeout:     60 * time.Second,
+		TLSHandshakeTimeout: 5 * time.Second,
+		DialContext: (&net.Dialer{
+			Timeout: 5 * time.Second, // establishing TCP
+		}).DialContext,
+	},
+}
 
 var cacheHits = promauto.NewCounter(prometheus.CounterOpts{
 	Name:        "containerd_cache_total",
