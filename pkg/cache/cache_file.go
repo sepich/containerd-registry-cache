@@ -9,23 +9,20 @@ import (
 	"github.com/sepich/containerd-registry-cache/pkg/model"
 )
 
-type CachingService interface {
-	GetCache(object *model.ObjectIdentifier) (*CachedObject, *CacheWriter, error)
-}
-
 type FileCache struct {
 	CacheDirectory string
 }
 
 var _ CachingService = &FileCache{}
 
-func (c *FileCache) GetCache(object *model.ObjectIdentifier) (*CachedObject, *CacheWriter, error) {
-	writer := &CacheWriter{
-		Object:         *object,
+func (c *FileCache) GetCache(object *model.ObjectIdentifier) (*CachedObject, CacheWriter, error) {
+	writer := &FileWriter{
+		object:         *object,
 		cacheDirectory: c.CacheDirectory,
 	}
 
-	manifest, size, err := c.getManifestOrNilOnMiss(object)
+	key := filepath.Join(c.CacheDirectory, ObjectToCacheName(object))
+	manifest, size, err := c.getManifestOrNilOnMiss(key)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -35,16 +32,14 @@ func (c *FileCache) GetCache(object *model.ObjectIdentifier) (*CachedObject, *Ca
 
 	reader := &CachedObject{
 		CacheManifest: *manifest,
-		Path:          filepath.Join(c.CacheDirectory, ObjectToCacheName(object)),
+		Path:          key,
 		SizeBytes:     size,
 	}
 
 	return reader, writer, nil
 }
 
-func (c *FileCache) getManifestOrNilOnMiss(object *model.ObjectIdentifier) (*CacheManifest, int64, error) {
-	cacheKey := ObjectToCacheName(object)
-	cacheFilePath := filepath.Join(c.CacheDirectory, cacheKey)
+func (c *FileCache) getManifestOrNilOnMiss(cacheFilePath string) (*CacheManifest, int64, error) {
 	cacheFilePathManifest := cacheFilePath + cacheManifestSuffix
 
 	var sizeBytes int64

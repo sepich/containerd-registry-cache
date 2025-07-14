@@ -10,18 +10,19 @@ import (
 	"github.com/sepich/containerd-registry-cache/pkg/model"
 )
 
-// CacheWriter provides a facility to request a stream to write to the cache
-type CacheWriter struct {
+// FileWriter provides a facility to request a stream to write to the cache
+type FileWriter struct {
 	cacheDirectory string
-	Object         model.ObjectIdentifier
+	object         model.ObjectIdentifier
 	file           *os.File
 }
 
-var _ io.Writer = &CacheWriter{}
+var _ io.Writer = &FileWriter{}
+var _ CacheWriter = &FileWriter{}
 
-func (c *CacheWriter) Write(b []byte) (n int, err error) {
+func (c *FileWriter) Write(b []byte) (n int, err error) {
 	if c.file == nil {
-		file, err := os.CreateTemp(c.cacheDirectory, c.Object.Ref)
+		file, err := os.CreateTemp(c.cacheDirectory, c.object.Ref)
 		if err != nil {
 			return 0, err
 		}
@@ -32,7 +33,7 @@ func (c *CacheWriter) Write(b []byte) (n int, err error) {
 }
 
 // Close will (if written to) close the temporary file, generate a cache manifest, and then move it to the cache folder.
-func (c *CacheWriter) Close(contentType, dockerContentDigest string) error {
+func (c *FileWriter) Close(contentType, dockerContentDigest string) error {
 	if c.file == nil {
 		return nil
 	}
@@ -42,7 +43,7 @@ func (c *CacheWriter) Close(contentType, dockerContentDigest string) error {
 		return err
 	}
 
-	cacheName := ObjectToCacheName(&c.Object)
+	cacheName := ObjectToCacheName(&c.object)
 	filePath := filepath.Join(c.cacheDirectory, cacheName)
 	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
 		return err
@@ -53,7 +54,7 @@ func (c *CacheWriter) Close(contentType, dockerContentDigest string) error {
 	}
 
 	manifest := &CacheManifest{
-		ObjectIdentifier: c.Object,
+		ObjectIdentifier: c.object,
 
 		ContentType:         contentType,
 		DockerContentDigest: dockerContentDigest,

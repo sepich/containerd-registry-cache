@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -77,7 +78,7 @@ func (s *CacheService) GetObject(object *model.ObjectIdentifier, isHead bool, he
 	w.Header().Add("X-Proxied-For", object.Registry)
 
 	skipCacheReason := s.getSkipReason(object)
-	var cacheWriter *cache.CacheWriter
+	var cacheWriter cache.CacheWriter
 	if skipCacheReason == "" {
 		var cached *cache.CachedObject
 		var err error
