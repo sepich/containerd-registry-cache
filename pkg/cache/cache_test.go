@@ -33,7 +33,7 @@ func TestReadWriteFromCache(t *testing.T) {
 				Ref:        "v1.2.3",
 				Type:       model.ObjectTypeManifest,
 			},
-			name:     "docker.io-m-user_repository-v1.2.3",
+			name:     "docker.io/user/repository/v1.2.3",
 			contents: []byte(`6bytes`),
 			manifest: []byte(`{
 				"Registry": "docker.io",
@@ -51,7 +51,7 @@ func TestReadWriteFromCache(t *testing.T) {
 				Ref:        "sha256:41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814",
 				Type:       model.ObjectTypeBlob,
 			},
-			name:     "docker.io-b-sha256:41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814",
+			name:     "blobs/41/41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814",
 			contents: []byte(`6bytes`),
 			manifest: []byte(`{
 				"Registry": "docker.io",
@@ -69,8 +69,10 @@ func TestReadWriteFromCache(t *testing.T) {
 		t.Run("read: "+tC.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
 
-			os.WriteFile(filepath.Join(tmpDir, tC.name), tC.contents, os.ModePerm)
-			os.WriteFile(filepath.Join(tmpDir, tC.name+".json"), tC.manifest, os.ModePerm)
+			p := filepath.Join(tmpDir, tC.name)
+			os.MkdirAll(filepath.Dir(p), os.ModePerm)
+			os.WriteFile(p, tC.contents, os.ModePerm)
+			os.WriteFile(p+".json", tC.manifest, os.ModePerm)
 
 			cacheService := &FileCache{
 				CacheDirectory: tmpDir,

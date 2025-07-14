@@ -47,6 +47,7 @@ Run it as:
 ### Notes
 - Cache volume data could be cleaned up at any time. There is no expiration and built-in auto cleaning. You can implement any cleanup policy via sidecar and `find -del` 
 - By default, both Blobs and Manifests (excluding `:latest`) are cached. You can disable Manifests caching altogether (`--cache-manifests=no`), to always re-query all tags (like mutable `:3`, `:3.1`, with immutable `:3.1.2`)
+- Blobs are reused across all registries, as they are "content addressable" via sha256
 - Pulls for cached private Manifests require no auth. Use with care for private registries!
 You can specify such registries as `--private-registry` to skip Manifest caching and only cache Blobs. Still, one can download such private Blob from the cache knowing its sha256 without auth.
 - You can use "default credentials" `--creds-file` to avoid dockerHub unauthenticated rate limits for example. File is `yaml` with section names equal to corresponding registry hosts:
@@ -66,7 +67,6 @@ You can specify such registries as `--private-registry` to skip Manifest caching
   ```
 
 ### TODO
-- Blobs are cached with no separation of registries "content-addressable storage", so layer space should be reused
 - S3 mode
 - lock on caching of the same uri?
 - verify content digest before caching

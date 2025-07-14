@@ -48,7 +48,7 @@ func main() {
 	for _, reg := range *privReg {
 		privateRegistries[reg] = true
 	}
-	if len(privateRegistries) == 0 {
+	if len(privateRegistries) != 0 {
 		logger.Info("Private registry configured", "registries", len(*privReg))
 	}
 

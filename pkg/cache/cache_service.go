@@ -25,9 +25,6 @@ func (c *FileCache) GetCache(object *model.ObjectIdentifier) (*CachedObject, *Ca
 		cacheDirectory: c.CacheDirectory,
 	}
 
-	cacheKey := ObjectToCacheName(object)
-	cacheFilePath := filepath.Join(c.CacheDirectory, cacheKey)
-
 	manifest, size, err := c.getManifestOrNilOnMiss(object)
 	if err != nil {
 		return nil, nil, err
@@ -38,7 +35,7 @@ func (c *FileCache) GetCache(object *model.ObjectIdentifier) (*CachedObject, *Ca
 
 	reader := &CachedObject{
 		CacheManifest: *manifest,
-		Path:          cacheFilePath,
+		Path:          filepath.Join(c.CacheDirectory, ObjectToCacheName(object)),
 		SizeBytes:     size,
 	}
 

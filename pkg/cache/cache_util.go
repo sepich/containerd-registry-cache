@@ -21,13 +21,12 @@ type CacheManifest struct {
 // ObjectToCacheName returns a filename for the relevant object
 func ObjectToCacheName(object *model.ObjectIdentifier) string {
 	// if it's a blob we spread it to the whole registry
-	var keyDirty string
+	var key string
+	id := strings.ReplaceAll(strings.Replace(object.Ref, "sha256:", "", 1), "/", "")
 	if object.Type == model.ObjectTypeBlob {
-		keyDirty = fmt.Sprintf("%s-b-%s", object.Registry, object.Ref)
+		key = fmt.Sprintf("blobs/%s/%s", id[0:2], id)
 	} else {
-		keyDirty = fmt.Sprintf("%s-m-%s-%s", object.Registry, object.Repository, object.Ref)
+		key = fmt.Sprintf("%s/%s/%s", object.Registry, object.Repository, object.Ref)
 	}
-	// TODO: Actually make this clean up each section
-	key := strings.ReplaceAll(keyDirty, "/", "_")
 	return key
 }

@@ -44,6 +44,9 @@ func (c *CacheWriter) Close(contentType, dockerContentDigest string) error {
 
 	cacheName := ObjectToCacheName(&c.Object)
 	filePath := filepath.Join(c.cacheDirectory, cacheName)
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		return err
+	}
 	err = os.Rename(c.file.Name(), filePath)
 	if err != nil {
 		return err
