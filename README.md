@@ -31,12 +31,13 @@ Available as a docker image: https://hub.docker.com/r/sepa/containerd-registry-c
 ```bash
 $ docker run sepa/containerd-registry-cache -h
 Usage of ./containerd-registry-cache:
+  -b, --bucket string                  Use S3 bucket for cache
   -d, --cache-dir string               Cache directory (default "/tmp/data")
-  -m, --cache-manifests                Cache manifests (default true)
-  -f, --creds-file string              Default credentials file to use for registries
+  -m, --cache-manifests                Enable manifests cache (default true)
+  -f, --creds-file string              Use credentials file for registry auth
   -l, --log-level string               Log level to use (debug, info) (default "info")
   -p, --port int                       Port to listen on (default 3000)
-      --private-registry stringArray   Private registry to skip Manifest caching for, can be specified multiple times
+      --private-registry stringArray   Private registry to skip Manifest caching for (can be specified multiple times)
   -t, --skip-tags string               RegEx of image tags to skip caching (default "latest")
   -v, --version                        Show version and exit
 ```
@@ -45,12 +46,21 @@ Run it as:
 - To make it useful for node-init level images too (like CNI), expose in as `Ingress`. Empty non-configured node should be able to make http requests to such address. But you probably want to prevent external requests to your cache.
 
 ### Notes
-- Cache volume data could be cleaned up at any time. There is no expiration and built-in auto cleaning. You can implement any cleanup policy via sidecar and `find -del` 
+- Cache volume data could be cleaned up at any time. There is no expiration and built-in auto cleaning. You can implement any cleanup policy via sidecar and `find -del`
+- You can also use S3 as a storage, by specifying `--bucket`. Access should be provided via IRSA or [default envs](https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-envvars.html), which would be checked on startup. Example of overriding S3 endpoint for China:
+  ```yaml
+  env:
+  - name: AWS_ENDPOINT_URL_S3
+    value: https://s3.cn-north-1.amazonaws.com.cn
+  - name: AWS_REGION
+    value: cn-north-1
+  ```
+  Cache dir is still used in this mode for temporary Blobs storage during S3 upload
 - By default, both Blobs and Manifests (excluding `:latest`) are cached. You can disable Manifests caching altogether (`--cache-manifests=no`), to always re-query all tags (like mutable `:3`, `:3.1`, with immutable `:3.1.2`)
 - Blobs are reused across all registries, as they are "content addressable" via sha256
 - Pulls for cached private Manifests require no auth. Use with care for private registries!
 You can specify such registries as `--private-registry` to skip Manifest caching and only cache Blobs. Still, one can download such private Blob from the cache knowing its sha256 without auth.
-- You can use "default credentials" `--creds-file` to avoid dockerHub unauthenticated rate limits for example. File is `yaml` with section names equal to corresponding registry hosts:
+- You can use registry credentials via `--creds-file` to avoid dockerHub unauthenticated rate limits for example. File is `yaml` with section names equal to corresponding registry hosts:
   ```yaml
   registry-1.docker.io:
     username: puller
@@ -67,9 +77,7 @@ You can specify such registries as `--private-registry` to skip Manifest caching
   ```
 
 ### TODO
-- S3 mode
 - lock on caching of the same uri?
-- verify content digest before caching
 
 ### How to test locally
 Docker distribution [API spec](https://distribution.github.io/distribution/spec/api/) example:

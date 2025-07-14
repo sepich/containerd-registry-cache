@@ -3,7 +3,9 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,6 +36,7 @@ type RegistryCreds struct {
 
 var client = &http.Client{
 	Transport: &http.Transport{
+		Proxy:               http.ProxyFromEnvironment,
 		IdleConnTimeout:     60 * time.Second,
 		TLSHandshakeTimeout: 5 * time.Second,
 		DialContext: (&net.Dialer{
@@ -80,7 +83,7 @@ func (s *CacheService) GetObject(object *model.ObjectIdentifier, isHead bool, he
 	skipCacheReason := s.getSkipReason(object)
 	var cacheWriter cache.CacheWriter
 	if skipCacheReason == "" {
-		var cached *cache.CachedObject
+		var cached cache.CachedObject
 		var err error
 		cached, cacheWriter, err = s.Cache.GetCache(object)
 		if err != nil {
@@ -90,24 +93,27 @@ func (s *CacheService) GetObject(object *model.ObjectIdentifier, isHead bool, he
 		}
 
 		if cached != nil {
-			logger.Info("Served from cache", "cache", "hit", "cached", cached)
+			meta := cached.GetMetadata()
+			logger.Info("Served from cache", "cache", "hit", "cached", meta)
 			cacheHits.Inc()
 
-			w.Header().Add("X-Proxy-Date", cached.CacheDate.String())
-			w.Header().Add("Age", strconv.Itoa(int(time.Since(cached.CacheDate).Seconds())))
-			w.Header().Add(model.HeaderContentLength, strconv.Itoa(int(cached.SizeBytes)))
-			w.Header().Add(model.HeaderContentType, cached.ContentType)
-			if cached.DockerContentDigest != "" {
-				w.Header().Add(model.HeaderDockerContentDigest, cached.DockerContentDigest)
+			w.Header().Add("X-Proxy-Date", meta.CacheDate.String())
+			w.Header().Add("Age", strconv.Itoa(int(time.Since(meta.CacheDate).Seconds())))
+			w.Header().Add(model.HeaderContentLength, strconv.Itoa(int(meta.SizeBytes)))
+			w.Header().Add(model.HeaderContentType, meta.ContentType)
+			if meta.DockerContentDigest != "" {
+				w.Header().Add(model.HeaderDockerContentDigest, meta.DockerContentDigest)
 			}
 			logger.Debug("Client response", "headers", w.Header())
 
-			reader, _ := cached.GetReader()
-			if err = readIntoWriters([]io.Writer{w}, reader); err != nil {
-				logger.Error("Error reading from cache", "error", err)
-				return
+			if !isHead {
+				reader, _ := cached.GetReader()
+				if err = readIntoWriters([]io.Writer{w}, reader); err != nil {
+					logger.Error("Error reading body from cache", "error", err)
+					return
+				}
+				reader.Close()
 			}
-			reader.Close()
 			return
 		}
 		// will cache response for all, but some clients can dislike zstd/gzip, so cache as raw full-range
@@ -137,12 +143,13 @@ func (s *CacheService) GetObject(object *model.ObjectIdentifier, isHead bool, he
 		skipCacheReason = "non-2xx upstream response"
 	}
 
-	writers := []io.Writer{}
 	var manifestBytes bytes.Buffer
+	sha := sha256.New()
+	writers := []io.Writer{}
 	if skipCacheReason == "" {
 		logger = logger.With("cache", "miss")
 		cacheMisses.Inc()
-		writers = append(writers, cacheWriter)
+		writers = append(writers, cacheWriter, sha)
 		if object.Type == model.ObjectTypeManifest {
 			writers = append(writers, &manifestBytes)
 		}
@@ -164,7 +171,18 @@ func (s *CacheService) GetObject(object *model.ObjectIdentifier, isHead bool, he
 		if object.Type == model.ObjectTypeManifest {
 			logger.Debug("Upstream returned manifest", "manifest", manifestBytes.Bytes())
 		}
-		cacheWriter.Close(upstreamResp.Header.Get(model.HeaderContentType), upstreamResp.Header.Get(model.HeaderDockerContentDigest))
+		// validate digest
+		digest := strings.ToLower(upstreamResp.Header.Get(model.HeaderDockerContentDigest))
+		if digest != "" {
+			shaHex := "sha256:" + strings.ToLower(hex.EncodeToString(sha.Sum(nil)))
+			if shaHex != digest {
+				logger.Error("Digest mismatch", "expected", digest, "actual", shaHex)
+				return
+			}
+		}
+		if err = cacheWriter.Close(upstreamResp.Header.Get(model.HeaderContentType), digest); err != nil {
+			logger.Error("Error saving to cache", "error", err)
+		}
 	}
 	logger.Info("Served from upstream", "status", upstreamResp.StatusCode)
 }

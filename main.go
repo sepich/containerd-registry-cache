@@ -20,11 +20,12 @@ import (
 
 func main() {
 	var cacheDir = pflag.StringP("cache-dir", "d", "/tmp/data", "Cache directory")
-	var credsFile = pflag.StringP("creds-file", "f", "", "Default credentials file to use for registries")
+	var bucket = pflag.StringP("bucket", "b", "", "Use S3 bucket for cache")
+	var credsFile = pflag.StringP("creds-file", "f", "", "Use credentials file for registry auth")
 	var port = pflag.IntP("port", "p", 3000, "Port to listen on")
 	var skipTags = pflag.StringP("skip-tags", "t", "latest", "RegEx of image tags to skip caching")
-	var cacheManifests = pflag.BoolP("cache-manifests", "m", true, "Cache manifests")
-	var privReg = pflag.StringArrayP("private-registry", "", []string{}, "Private registry to skip Manifest caching for, can be specified multiple times")
+	var cacheManifests = pflag.BoolP("cache-manifests", "m", true, "Enable manifests cache")
+	var privReg = pflag.StringArrayP("private-registry", "", []string{}, "Private registry to skip Manifest caching for (can be specified multiple times)")
 	var logLevel = pflag.StringP("log-level", "l", "info", "Log level to use (debug, info)")
 	var ver = pflag.BoolP("version", "v", false, "Show version and exit")
 	pflag.Parse()
@@ -52,8 +53,20 @@ func main() {
 		logger.Info("Private registry configured", "registries", len(*privReg))
 	}
 
+	var c cache.CachingService
+	if *bucket != "" {
+		logger.Info("Using S3 bucket for cache", "bucket", *bucket)
+		c, err = cache.NewS3Cache(*bucket, *cacheDir)
+		if err != nil {
+			logger.Error("Could not start S3 cache", "error", err)
+			os.Exit(1)
+		}
+	} else {
+		c = &cache.FileCache{CacheDirectory: *cacheDir}
+	}
+
 	router := mux.NewRouter(&service.CacheService{
-		Cache:             &cache.FileCache{CacheDirectory: *cacheDir},
+		Cache:             c,
 		SkipTags:          regexp.MustCompile(*skipTags),
 		DefaultCreds:      readCreds(*credsFile, logger),
 		CacheManifests:    *cacheManifests,
@@ -115,24 +128,24 @@ func getLogger(logLevel string) *slog.Logger {
 func readCreds(credsFile string, logger *slog.Logger) map[string]service.RegistryCreds {
 	res := map[string]service.RegistryCreds{}
 	if credsFile != "" {
-		defaultCredsFile, err := os.ReadFile(credsFile)
+		data, err := os.ReadFile(credsFile)
 		if err != nil {
-			logger.Error("Could not read default credentials file", "error", err)
+			logger.Error("Could not read registry credentials file", "error", err)
 			os.Exit(1)
 		}
 
-		err = yaml.Unmarshal(defaultCredsFile, &res)
+		err = yaml.Unmarshal(data, &res)
 		if err != nil {
-			logger.Error("Could not parse default credentials file", "error", err)
+			logger.Error("Could not parse registry credentials file", "error", err)
 			os.Exit(1)
 		}
 		for k, v := range res {
 			if v.Username == "" || v.Password == "" {
-				logger.Error("Default credentials file contains invalid credentials", "registry", k)
+				logger.Error("Registry credentials file contains invalid credentials", "registry", k)
 				os.Exit(1)
 			}
 		}
-		logger.Info("Loaded default credentials", "registries", len(res))
+		logger.Info("Loaded registry credentials", "registries", len(res))
 	}
 	return res
 }

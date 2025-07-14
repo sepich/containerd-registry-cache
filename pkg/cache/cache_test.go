@@ -83,9 +83,10 @@ func TestReadWriteFromCache(t *testing.T) {
 			assert.NotNil(t, writer)
 			assert.NotNil(t, cachedObject)
 
-			assert.Equal(t, int64(6), cachedObject.SizeBytes)
-			assert.Equal(t, contentType, cachedObject.ContentType)
-			assert.Equal(t, digest, cachedObject.DockerContentDigest)
+			meta := cachedObject.GetMetadata()
+			assert.Equal(t, int64(6), meta.SizeBytes)
+			assert.Equal(t, contentType, meta.ContentType)
+			assert.Equal(t, digest, meta.DockerContentDigest)
 
 			reader, err := cachedObject.GetReader()
 			assert.Nil(t, err)
