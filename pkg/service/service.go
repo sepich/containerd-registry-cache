@@ -163,7 +163,7 @@ func (s *CacheService) GetObject(object *model.ObjectIdentifier, isHead bool, he
 
 	err = readIntoWriters(writers, upstreamResp.Body)
 	if err != nil {
-		logger.Error("Error reading upstream response body", "error", err)
+		logger.Error("Error while reading upstream response body", "error", err)
 		return // don't cache on error
 	}
 
@@ -227,7 +227,7 @@ func readIntoWriters(dst []io.Writer, src io.Reader) error {
 					werr = io.ErrShortWrite
 				}
 				if werr != nil {
-					return fmt.Errorf("write error during copy: %w", rerr)
+					return fmt.Errorf("write error during copy: %w", werr)
 				}
 			}
 		}
