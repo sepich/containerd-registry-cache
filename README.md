@@ -1,6 +1,6 @@
 # containerd-registry-cache
 
-A pull-through registry cache for `containerd` intended for Kubernetes clusters.
+A pull-through multi-registry cache for `containerd` in Kubernetes clusters.
 
 ### Alternatives
 - [jamesorlakin/cacheyd](https://github.com/jamesorlakin/cacheyd) - the original project this fork is based on
@@ -21,7 +21,7 @@ A pull-through registry cache for `containerd` intended for Kubernetes clusters.
   EOF
   # no need to restart containerd, changes are applied automatically
   ```
-- With this setup, running `docker pull alpine` results in a request like: 
+- With this setup, running `crictl pull alpine` results in a request like: 
   `http://localhost:30123/v2/library/alpine/manifests/latest?ns=registry-1.docker.io`
 - And `containerd-registry-cache`, listening on `localhost:30123`, has information that this specific manifest should be fetched from `registry-1.docker.io`. That allows to use single cache endpoint for different upstream registries.
 - In case `localhost:30123` is not available, `containerd` falls back to the original registry
@@ -44,10 +44,18 @@ Usage of ./containerd-registry-cache:
 Run it as: 
 - `Nodeport` service. This way you can access it from any node on `localhost:<port>`, but only after CNI is started. 
 - To make it useful for node-init level images too (like CNI), expose in as `Ingress`. Empty non-configured node should be able to make http requests to such address. But you probably want to prevent external requests to your cache.
+- In "PVC" (default) mode, cache data is stored in `--cache-dir`. If you want to scale horizontally, each Pod would eventually have all the data. You can shard requests to individual Pods on Ingress level, i.e `ingress-nginx` has this:
+  ```yaml
+  annotations:
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$uri"
+    nginx.ingress.kubernetes.io/proxy-next-upstream: error timeout http_500 http_502 http_503 http_504
+    nginx.ingress.kubernetes.io/proxy-next-upstream-tries: "3"
+  ```
+- In "S3" mode, cache data is stored in `--bucket`. That simplifies horizontal scaling, as each Pod has access to all the data. But latency and bandwidth is higher.
 
 ### Notes
-- Cache volume data could be cleaned up at any time. There is no expiration and built-in auto cleaning. You can implement any cleanup policy via sidecar and `find -del`
-- You can also use S3 as a storage, by specifying `--bucket`. Access should be provided via IRSA or [default envs](https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-envvars.html), which would be checked on startup. Example of overriding S3 endpoint for China:
+- Cache volume data could be cleaned up at any time. There is no expiration and built-in auto cleaning. You can implement any cleanup policy in PVC mode via sidecar and `find -del`. In S3 mode, you can use S3 lifecycle rules.
+- S3 could be used for storage by specifying `--bucket`. Access should be provided via IRSA or [default envs](https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-envvars.html), which would be checked on startup. Example of overriding S3 endpoint for China:
   ```yaml
   env:
   - name: AWS_ENDPOINT_URL_S3
@@ -55,11 +63,11 @@ Run it as:
   - name: AWS_REGION
     value: cn-north-1
   ```
-  Cache dir is still used in this mode for temporary Blobs storage during S3 upload
+  Cache dir is still used in this mode for ephemeral storage during S3 upload
 - By default, both Blobs and Manifests (excluding `:latest`) are cached. You can disable Manifests caching altogether (`--cache-manifests=no`), to always re-query all tags (like mutable `:3`, `:3.1`, with immutable `:3.1.2`)
-- Blobs are reused across all registries, as they are "content addressable" via sha256
-- Pulls for cached private Manifests require no auth. Use with care for private registries!
-You can specify such registries as `--private-registry` to skip Manifest caching and only cache Blobs. Still, one can download such private Blob from the cache knowing its sha256 without auth.
+- Blobs are reused across all registries, as they are uniquely "content addressable" by sha256
+- Pulls for cached private Manifests require no auth. Use with care for private registries!  
+You can specify such registries as `--private-registry` to skip Manifest caching and only cache Blobs. Still, one can download such private Blob from the cache knowing its sha256 without auth. Also, keep in mind that k8s by default does not prevent running a private image already existing on a Node.
 - You can use registry credentials via `--creds-file` to avoid dockerHub unauthenticated rate limits for example. File is `yaml` with section names equal to corresponding registry hosts:
   ```yaml
   registry-1.docker.io:
@@ -69,15 +77,37 @@ You can specify such registries as `--private-registry` to skip Manifest caching
     username: org-pull
     password: secret2
   ```
-- Prometheus metrics are available at the same `--port` on `/metrics` endpoint:
+- Prometheus metrics are available on `--port` at `/metrics` endpoint:
   ```ini
   containerd_cache_total{result="hit"}  # served from cache 
   containerd_cache_total{result="miss"} # saved to cache
   containerd_cache_total{result="skip"} # not saved to cache due to `--skip-tags` or `--cache-manifests=no`
   ```
+- You can use standard `HTTPS_PROXY`/`NO_PROXY` env vars to route requests from the cache to upstream registries, when nodes have no direct access to them (like in China)
 
-### TODO
-- lock on caching of the same uri?
+### Auth flow
+Default auth flow looks like this:
+```mermaid
+sequenceDiagram
+    Containerd->>Cache: (1) GET name/manifests/latest?ns=registry
+    Note over Cache: cache skip for :latest
+    Cache->>Registry: (2) GET name/manifests/latest
+    Registry->>Cache: (3) 401 www-authenticate
+    Note over Cache: no cache
+    Cache->>Containerd: (4) 401 www-authenticate
+    create participant Auth
+    Containerd-->>Auth: (5) Auth Basic token?service=&scope=
+    destroy Auth
+    Auth-->>Containerd: (6) 200 json with token
+    Containerd->>Cache: (7) GET name/manifests/latest?ns=registry Bearer
+    Cache->>Registry: (8) GET name/manifests/latest Bearer
+    Registry->>Cache: (9) 200 Body
+    Note over Cache: cached
+    Cache->>Containerd: (10) 200 Body
+```
+Cache forwards all non-2xx responses (4) as-is, and `containerd` authenticates with the registry directly (5). Then, following responses (9) to requests with Bearer Auth (8) are cached.
+
+By using `--creds-file` option, cache now intercepts 401 responses (4) and tries to authenticate with the registry directly using provided credentials. Only in case the creds are invalid, `containerd` would get 401 and try to authenticate with the registry directly using some own `imagePullSecrets`.
 
 ### How to test locally
 Docker distribution [API spec](https://distribution.github.io/distribution/spec/api/) example:
