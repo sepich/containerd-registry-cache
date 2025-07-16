@@ -9,6 +9,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/sepich/containerd-registry-cache/pkg/model"
@@ -19,7 +20,8 @@ var _ CachingService = &S3Cache{}
 type S3Cache struct {
 	bucket         string
 	client         *s3.Client
-	cacheDirectory string // TODO: streaming upload?
+	cacheDirectory string
+	uploader       *manager.Uploader
 }
 
 func NewS3Cache(bucket, cacheDir string) (*S3Cache, error) {
@@ -41,6 +43,10 @@ func NewS3Cache(bucket, cacheDir string) (*S3Cache, error) {
 		bucket:         bucket,
 		client:         client,
 		cacheDirectory: cacheDir,
+		uploader: manager.NewUploader(client, func(u *manager.Uploader) {
+			u.Concurrency = 4
+			u.LeavePartsOnError = false
+		}),
 	}, nil
 }
 
@@ -49,6 +55,7 @@ func (c *S3Cache) GetCache(object *model.ObjectIdentifier) (CachedObject, CacheW
 	writer := &S3Writer{
 		object:         *object,
 		client:         c.client,
+		uploader:       c.uploader,
 		bucket:         c.bucket,
 		key:            key,
 		cacheDirectory: c.cacheDirectory,
@@ -116,6 +123,7 @@ type S3Writer struct {
 	key            string
 	cacheDirectory string
 	file           *os.File
+	uploader       *manager.Uploader
 }
 
 func (w *S3Writer) Write(b []byte) (n int, err error) {
@@ -139,8 +147,11 @@ func (w *S3Writer) Close(contentType, dockerContentDigest string) error {
 	if err != nil {
 		return fmt.Errorf("failed to stat cache file: %v", err)
 	}
+	if _, err = w.file.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("failed to seek cache file: %v", err)
+	}
 
-	_, err = w.client.PutObject(context.TODO(), &s3.PutObjectInput{
+	_, err = w.uploader.Upload(context.TODO(), &s3.PutObjectInput{
 		Bucket:        aws.String(w.bucket),
 		Key:           aws.String(w.key),
 		Body:          w.file,
