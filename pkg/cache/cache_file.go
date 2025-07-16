@@ -147,3 +147,10 @@ func (c *FileWriter) Close(contentType, dockerContentDigest string) error {
 	manifestFile.Write(manifestJson)
 	return manifestFile.Close()
 }
+
+func (c *FileWriter) Cleanup() {
+	if c.file != nil {
+		_ = c.file.Close()
+		_ = os.Remove(c.file.Name())
+	}
+}

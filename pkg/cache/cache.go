@@ -23,4 +23,5 @@ type ObjMeta struct {
 type CacheWriter interface {
 	Write(p []byte) (n int, err error)
 	Close(contentType, dockerContentDigest string) error
+	Cleanup() // allows the writer to clean up any temporary files or resources
 }

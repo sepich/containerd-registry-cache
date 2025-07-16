@@ -135,3 +135,15 @@ $ curl -i 'https://auth.docker.io/token?service=registry.docker.io&scope=reposit
 
 $ curl -i https://registry-1.docker.io/v2/library/alpine/manifests/latest -H'Authorization: Bearer xxx'
 ```
+
+### How to test on a k8s node
+This could be useful to see the http requests during pull (`ctr` does the pull)
+```bash
+ctr image pull --hosts-dir /etc/containerd/certs.d --http-dump docker.io/library/hello-world:latest
+```
+Or `containerd` makes the pull:
+```bash
+crictl pull docker.io/library/alpine
+# logs are here
+journalctl -fu containerd
+```

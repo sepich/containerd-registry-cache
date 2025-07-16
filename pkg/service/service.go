@@ -150,6 +150,7 @@ func (s *CacheService) GetObject(object *model.ObjectIdentifier, isHead bool, he
 		logger = logger.With("cache", "miss")
 		cacheMisses.Inc()
 		writers = append(writers, cacheWriter, sha)
+		defer cacheWriter.Cleanup()
 		if object.Type == model.ObjectTypeManifest {
 			writers = append(writers, &manifestBytes)
 		}

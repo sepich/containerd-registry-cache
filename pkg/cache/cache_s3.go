@@ -131,12 +131,14 @@ func (w *S3Writer) Write(b []byte) (n int, err error) {
 }
 
 func (w *S3Writer) Close(contentType, dockerContentDigest string) error {
+	if w.file == nil {
+		return nil
+	}
+
 	info, err := w.file.Stat()
 	if err != nil {
 		return fmt.Errorf("failed to stat cache file: %v", err)
 	}
-	w.file.Seek(0, io.SeekStart)
-	defer w.file.Close()
 
 	_, err = w.client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket:        aws.String(w.bucket),
@@ -152,5 +154,12 @@ func (w *S3Writer) Close(contentType, dockerContentDigest string) error {
 		return fmt.Errorf("failed to upload object: %v", err)
 	}
 
-	return os.Remove(w.file.Name())
+	return w.file.Close()
+}
+
+func (w *S3Writer) Cleanup() {
+	if w.file != nil {
+		_ = w.file.Close()
+		_ = os.Remove(w.file.Name())
+	}
 }
