@@ -2,10 +2,13 @@ package cache
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -151,18 +154,30 @@ func (w *S3Writer) Close(contentType, dockerContentDigest string) error {
 		return fmt.Errorf("failed to seek cache file: %v", err)
 	}
 
+	// valudate digest on upload
+	digest := dockerContentDigest
+	if digest == "" && w.object.Type == model.ObjectTypeBlob {
+		digest = w.object.Ref
+	}
+	i := strings.LastIndex(digest, ":")
+	bin, err := hex.DecodeString(digest[i+1:])
+	if err != nil {
+		return fmt.Errorf("failed to decode docker digest: %v", err)
+	}
 	_, err = w.uploader.Upload(context.TODO(), &s3.PutObjectInput{
-		Bucket:        aws.String(w.bucket),
-		Key:           aws.String(w.key),
-		Body:          w.file,
-		ContentLength: aws.Int64(info.Size()),
+		Bucket:            aws.String(w.bucket),
+		Key:               aws.String(w.key),
+		Body:              w.file,
+		ContentLength:     aws.Int64(info.Size()),
+		ChecksumAlgorithm: types.ChecksumAlgorithmSha256,
+		ChecksumSHA256:    aws.String(base64.StdEncoding.EncodeToString(bin)),
 		Metadata: map[string]string{
 			"content-type":          contentType,
 			"docker-content-digest": dockerContentDigest,
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to upload object: %v", err)
+		return fmt.Errorf("failed to upload object %s: %w", base64.StdEncoding.EncodeToString(bin), err)
 	}
 
 	return w.file.Close()

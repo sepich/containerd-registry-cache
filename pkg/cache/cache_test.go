@@ -14,7 +14,7 @@ import (
 
 func TestReadWriteFromCache(t *testing.T) {
 	var contentType = "application/vnd.docker.distribution.manifest.list.v2+json"
-	var digest = "sha256:41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814"
+	var digest = "sha256:65f65e75f5eed0e6ce330028a88f1d62475ea0c4a3d8dc038bde7866aeedf76d"
 
 	headers := http.Header{}
 	headers.Add(model.HeaderContentType, contentType)
@@ -38,7 +38,7 @@ func TestReadWriteFromCache(t *testing.T) {
 			manifest: []byte(`{
 				"Registry": "docker.io",
 				"ContentType": "application/vnd.docker.distribution.manifest.list.v2+json",
-				"DockerContentDigest": "sha256:41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814",
+				"DockerContentDigest": "sha256:65f65e75f5eed0e6ce330028a88f1d62475ea0c4a3d8dc038bde7866aeedf76d",
 				"Repository": "user/repository",
 				"Ref": "v1.2.3",
 				"Type": "manifest"
@@ -48,17 +48,17 @@ func TestReadWriteFromCache(t *testing.T) {
 			object: model.ObjectIdentifier{
 				Registry:   "docker.io",
 				Repository: "user/repository",
-				Ref:        "sha256:41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814",
+				Ref:        "sha256:65f65e75f5eed0e6ce330028a88f1d62475ea0c4a3d8dc038bde7866aeedf76d",
 				Type:       model.ObjectTypeBlob,
 			},
-			name:     "blobs/41/41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814",
+			name:     "blobs/65/65f65e75f5eed0e6ce330028a88f1d62475ea0c4a3d8dc038bde7866aeedf76d",
 			contents: []byte(`6bytes`),
 			manifest: []byte(`{
 				"Registry": "docker.io",
 				"ContentType": "application/vnd.docker.distribution.manifest.list.v2+json",
-				"DockerContentDigest": "sha256:41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814",
+				"DockerContentDigest": "sha256:65f65e75f5eed0e6ce330028a88f1d62475ea0c4a3d8dc038bde7866aeedf76d",
 				"Repository": "user/repository",
-				"Ref": "sha256:41891b95aca23018ba65b320ff3ce10a98ee3cb39261f02fd74867c68414e814",
+				"Ref": "sha256:65f65e75f5eed0e6ce330028a88f1d62475ea0c4a3d8dc038bde7866aeedf76d",
 				"Type": "blob"
 			}`),
 		},

@@ -1,11 +1,15 @@
 package cache
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sepich/containerd-registry-cache/pkg/model"
@@ -111,6 +115,25 @@ func (c *FileWriter) Close(contentType, dockerContentDigest string) error {
 		return nil
 	}
 
+	// validate digest
+	digest := dockerContentDigest
+	if dockerContentDigest == "" && c.object.Type == model.ObjectTypeBlob {
+		digest = c.object.Ref
+	}
+	if digest != "" {
+		sha := sha256.New()
+		if _, err := c.file.Seek(0, io.SeekStart); err != nil {
+			return fmt.Errorf("failed to seek cache file: %v", err)
+		}
+		_, err := io.Copy(sha, c.file)
+		if err != nil {
+			return err
+		}
+		shaHex := "sha256:" + strings.ToLower(hex.EncodeToString(sha.Sum(nil)))
+		if shaHex != digest {
+			return fmt.Errorf("digest mismatch: expected %s, actual %s", digest, shaHex)
+		}
+	}
 	err := c.file.Close()
 	if err != nil {
 		return err
