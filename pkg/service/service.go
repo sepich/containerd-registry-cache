@@ -3,7 +3,9 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -142,11 +144,12 @@ func (s *CacheService) GetObject(object *model.ObjectIdentifier, isHead bool, he
 	}
 
 	var manifestBytes bytes.Buffer
+	sha := sha256.New()
 	writers := []io.Writer{}
 	if skipCacheReason == "" {
 		logger = logger.With("cache", "miss")
 		cacheMisses.Inc()
-		writers = append(writers, cacheWriter)
+		writers = append(writers, cacheWriter, sha)
 		defer cacheWriter.Cleanup()
 		if object.Type == model.ObjectTypeManifest {
 			writers = append(writers, &manifestBytes)
@@ -169,8 +172,20 @@ func (s *CacheService) GetObject(object *model.ObjectIdentifier, isHead bool, he
 		if object.Type == model.ObjectTypeManifest {
 			logger.Debug("Upstream returned manifest", "manifest", manifestBytes.Bytes())
 		}
-		digest := strings.ToLower(upstreamResp.Header.Get(model.HeaderDockerContentDigest))
-		if err = cacheWriter.Close(upstreamResp.Header.Get(model.HeaderContentType), digest); err != nil {
+		// validate digest
+		cd := strings.ToLower(upstreamResp.Header.Get(model.HeaderDockerContentDigest))
+		digest := cd
+		if digest == "" {
+			digest = object.Ref
+		}
+		if strings.HasPrefix(digest, "sha256:") {
+			shaHex := "sha256:" + strings.ToLower(hex.EncodeToString(sha.Sum(nil)))
+			if shaHex != digest {
+				logger.Error("Digest mismatch", "expected", digest, "actual", shaHex)
+				return
+			}
+		}
+		if err = cacheWriter.Close(upstreamResp.Header.Get(model.HeaderContentType), cd); err != nil {
 			logger.Error("Error saving to cache", "error", err)
 		}
 	}

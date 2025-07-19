@@ -2,13 +2,10 @@ package cache
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -33,7 +30,12 @@ func NewS3Cache(bucket, cacheDir string) (*S3Cache, error) {
 		return nil, fmt.Errorf("Failed to load AWS config: %v", err)
 	}
 	// check access on startup
-	client := s3.NewFromConfig(cfg)
+	client := s3.NewFromConfig(cfg, func(options *s3.Options) {
+		// There are files with sha256 checksums in the bucket, but SDK can only verify CRC32
+		// https://docs.aws.amazon.com/sdkref/latest/guide/feature-dataintegrity.html#dataintegrity-sdk-compat
+		// SDK 2025/07/18 16:06:36 WARN Skipped validation of multipart checksum.
+		options.DisableLogOutputChecksumValidationSkipped = true
+	})
 	_, err = client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
 		Bucket:  &bucket,
 		MaxKeys: aws.Int32(1),
@@ -154,30 +156,22 @@ func (w *S3Writer) Close(contentType, dockerContentDigest string) error {
 		return fmt.Errorf("failed to seek cache file: %v", err)
 	}
 
-	// valudate digest on upload
-	digest := dockerContentDigest
-	if digest == "" && w.object.Type == model.ObjectTypeBlob {
-		digest = w.object.Ref
-	}
-	i := strings.LastIndex(digest, ":")
-	bin, err := hex.DecodeString(digest[i+1:])
-	if err != nil {
-		return fmt.Errorf("failed to decode docker digest: %v", err)
-	}
+	// We cant pass ChecksumSHA256 here, because it only works for single-part uploads <5Mb
+	// https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html#MultipartUploads-Checksums
+	// https://github.com/aws/aws-sdk-go-v2/issues/1040#issuecomment-1076796892
+	// file on disk sha256 is already validated, and SDK would validate upload by CRC32
 	_, err = w.uploader.Upload(context.TODO(), &s3.PutObjectInput{
-		Bucket:            aws.String(w.bucket),
-		Key:               aws.String(w.key),
-		Body:              w.file,
-		ContentLength:     aws.Int64(info.Size()),
-		ChecksumAlgorithm: types.ChecksumAlgorithmSha256,
-		ChecksumSHA256:    aws.String(base64.StdEncoding.EncodeToString(bin)),
+		Bucket:        aws.String(w.bucket),
+		Key:           aws.String(w.key),
+		Body:          w.file,
+		ContentLength: aws.Int64(info.Size()),
 		Metadata: map[string]string{
 			"content-type":          contentType,
 			"docker-content-digest": dockerContentDigest,
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to upload object %s: %w", base64.StdEncoding.EncodeToString(bin), err)
+		return fmt.Errorf("failed to upload object: %w", err)
 	}
 
 	return w.file.Close()

@@ -130,10 +130,14 @@ www-authenticate: Bearer realm="https://auth.docker.io/token",service="registry.
 # or in case of Basic auth:
 # WWW-Authenticate: Basic realm="Registry Realm"
 
+# login with basic auth
 $ curl -i 'https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/alpine:pull' [-u user:pass]
 {"token": "xxx", ...
 
-$ curl -i https://registry-1.docker.io/v2/library/alpine/manifests/latest -H'Authorization: Bearer xxx'
+# or get anon token
+export token=$(curl -s "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/alpine:pull" | jq -r .token)
+
+$ curl -i -H"Authorization: Bearer $token" https://registry-1.docker.io/v2/library/alpine/manifests/latest 
 ```
 
 ### How to test on a k8s node
