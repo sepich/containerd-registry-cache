@@ -5,9 +5,11 @@ A pull-through multi-registry cache for `containerd` in Kubernetes clusters.
 ### Alternatives
 - [jamesorlakin/cacheyd](https://github.com/jamesorlakin/cacheyd) - the original project this fork is based on
 - [aceeric/ociregistry](https://github.com/aceeric/ociregistry) - uses stateful disk/memory data, which limits horizontal scaling and high availability
+- [k8s-image-swapper](https://github.com/estahn/k8s-image-swapper/) - mutate Pods to a copy of image in ECR, needs access to all cluster Secrets.
+- [docker-registry-proxy](https://github.com/rpardini/docker-registry-proxy) - https MITM caching proxy, needs installing trusted CA to all prod hosts.
 
 ### How it works
-- Starting from `containerd` v2, mirror registry requests [include](https://github.com/containerd/containerd/blob/v2.1.3/docs/hosts.md#registry-host-namespace) `?ns=<origin>` query argument. This allows you to set up `containerd` with a single mirror like so: 
+- Starting from `containerd` v1.6.17, mirror registry requests [include](https://github.com/containerd/containerd/blob/v2.1.3/docs/hosts.md#registry-host-namespace) `?ns=<origin>` query argument. This allows to set up `containerd` with a single mirror like so: 
   ```bash
   # check that /etc/containerd/config.toml has this already set:
   [plugins."io.containerd.grpc.v1.cri".registry]
