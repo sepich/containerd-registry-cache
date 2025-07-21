@@ -103,6 +103,7 @@ type S3Object struct {
 }
 
 func (o *S3Object) GetReader() (io.ReadCloser, error) {
+	// TODO: return presigned link for blobs?
 	obj, err := o.client.GetObject(context.TODO(), &s3.GetObjectInput{
 		Bucket: &o.bucket,
 		Key:    &o.Path,

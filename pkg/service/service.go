@@ -94,7 +94,15 @@ func (s *CacheService) GetObject(object *model.ObjectIdentifier, isHead bool, he
 
 		if cached != nil {
 			meta := cached.GetMetadata()
-			logger.Info("Served from cache", "cache", "hit", "cached", meta)
+			logger.Info("Served from cache", "cache", "hit", slog.Group("cached",
+				"origin", meta.Registry+"/"+meta.Repository,
+				"type", meta.Type,
+				"date", meta.CacheDate,
+				"size", meta.SizeBytes,
+				"content-type", meta.ContentType,
+				"content-digest", meta.DockerContentDigest,
+				"path", meta.Path,
+			))
 			cacheHits.Inc()
 
 			w.Header().Add("X-Proxy-Date", meta.CacheDate.String())
