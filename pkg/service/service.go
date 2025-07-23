@@ -35,13 +35,20 @@ type RegistryCreds struct {
 }
 
 var client = &http.Client{
+	// https://github.com/golang/go/blob/71c2bf551303930faa32886446910fa5bd0a701a/src/net/http/transport.go#L45-L56
 	Transport: &http.Transport{
-		Proxy:               http.ProxyFromEnvironment,
-		IdleConnTimeout:     60 * time.Second,
-		TLSHandshakeTimeout: 5 * time.Second,
+		Proxy:                 http.ProxyFromEnvironment,
+		IdleConnTimeout:       60 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
 		DialContext: (&net.Dialer{
-			Timeout: 5 * time.Second, // establishing TCP
+			Timeout:   5 * time.Second, // establishing TCP
+			KeepAlive: 30 * time.Second,
 		}).DialContext,
+		ForceAttemptHTTP2:   true,
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		DisableKeepAlives:   false,
 	},
 }
 
@@ -116,11 +123,11 @@ func (s *CacheService) GetObject(object *model.ObjectIdentifier, isHead bool, he
 
 			if !isHead {
 				reader, _ := cached.GetReader()
+				defer reader.Close()
 				if err = readIntoWriters([]io.Writer{w}, reader); err != nil {
 					logger.Error("Error reading body from cache", "error", err)
 					return
 				}
-				reader.Close()
 			}
 			return
 		}
