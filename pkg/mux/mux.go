@@ -51,6 +51,9 @@ func handleService(s service.Service, vars map[string]string, t model.ObjectType
 	}
 	logger = logger.With("method", r.Method, "uri", r.RequestURI, "addr", ip, "request_id", r.Header.Get("X-Request-ID"))
 
+	if registry == "" && strings.HasPrefix(r.Header.Get("User-Agent"), "docker/") {
+		registry = "docker.io" // docker --registry-mirrors
+	}
 	if registry == "" {
 		w.WriteHeader(400)
 		w.Write([]byte("No `ns` query string found (are you using containerd?): I don't know what registry to ask for " + repo))

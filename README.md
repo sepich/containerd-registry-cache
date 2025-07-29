@@ -86,6 +86,8 @@ You can specify such registries as `--private-registry` to skip Manifest caching
   containerd_cache_total{result="skip"} # not saved to cache due to `--skip-tags` or `--cache-manifests=no`
   ```
 - You can use standard `HTTPS_PROXY`/`NO_PROXY` env vars to route requests from the cache to upstream registries, when nodes have no direct access to them (like in China)
+- It also works for `docker` as [registry-mirrors](https://docs.docker.com/docker-hub/image-library/mirror/#configure-the-docker-daemon).   
+  Docker does not set `?ns=` query argument in requests. In this case if `User-agent` header starts with `docker/` then `docker.io` registry is used as upstream. Docker `--registry-mirrors` is only for dockerHub anyway.
 
 ### Auth flow
 Default auth flow looks like this:
