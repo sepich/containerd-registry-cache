@@ -79,6 +79,7 @@ type CacheService struct {
 	DefaultCreds      map[string]RegistryCreds
 	CacheManifests    bool
 	PrivateRegistries map[string]bool
+	CheckAvailability bool
 }
 
 var _ Service = &CacheService{}
@@ -86,6 +87,12 @@ var _ Service = &CacheService{}
 func (s *CacheService) GetObject(object *model.ObjectIdentifier, isHead bool, headers *http.Header, w http.ResponseWriter, logger *slog.Logger) {
 	w.Header().Add("X-Proxied-By", "containerd-registry-cache")
 	w.Header().Add("X-Proxied-For", object.Registry)
+
+	urlTemplate := "https://%s/v2/%s/blobs/%s"
+	if object.Type == model.ObjectTypeManifest {
+		urlTemplate = "https://%s/v2/%s/manifests/%s"
+	}
+	objectUrl := fmt.Sprintf(urlTemplate, object.Registry, object.Repository, object.Ref)
 
 	skipCacheReason := s.getSkipReason(object)
 	var cacheWriter cache.CacheWriter
@@ -100,6 +107,32 @@ func (s *CacheService) GetObject(object *model.ObjectIdentifier, isHead bool, he
 		}
 
 		if cached != nil {
+			if s.CheckAvailability {
+				// Check if the upstream registry object is available to the client with passed credentials
+				checkResp, err := s.reqWithCreds(objectUrl, "HEAD", headers, &logger)
+				if err != nil {
+					logger.Error("Error checking upstream object availability", "error", err)
+					w.WriteHeader(500)
+					return
+				}
+				// Discard the body immediately so the connection could be reused (if a body was returned for some reason)
+				io.Copy(io.Discard, checkResp.Body)
+				checkResp.Body.Close()
+
+				if checkResp.StatusCode != http.StatusOK {
+					logger.Debug("Upstream returned non-200 response code when checking object availability",
+						"url", objectUrl,
+						"status", checkResp.StatusCode,
+						"headers", checkResp.Header,
+					)
+					// Need to pass the headers through so the client understands what needs to be done to log in
+					copyHeaders(w.Header(), checkResp.Header)
+					w.WriteHeader(checkResp.StatusCode)
+					w.Write([]byte(fmt.Sprintf("Upstream registry returned status code %d when checking object availability", checkResp.StatusCode)))
+					return
+				}
+			}
+
 			meta := cached.GetMetadata()
 			logger.Info("Served from cache", "cache", "hit", slog.Group("cached",
 				"origin", meta.Registry+"/"+meta.Repository,
@@ -136,12 +169,7 @@ func (s *CacheService) GetObject(object *model.ObjectIdentifier, isHead bool, he
 		headers.Del("Range")
 	}
 
-	url := "https://%s/v2/%s/blobs/%s"
-	if object.Type == model.ObjectTypeManifest {
-		url = "https://%s/v2/%s/manifests/%s"
-	}
-
-	upstreamResp, err := s.reqWithCreds(fmt.Sprintf(url, object.Registry, object.Repository, object.Ref), "GET", headers, &logger)
+	upstreamResp, err := s.reqWithCreds(objectUrl, "GET", headers, &logger)
 	if err != nil {
 		logger.Error("Error proxying request", "error", err)
 		w.WriteHeader(500)
