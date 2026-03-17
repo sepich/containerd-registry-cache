@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -268,6 +269,26 @@ func copyHeaders(dst, src http.Header) {
 	}
 }
 
+// findCreds looks up credentials by longest prefix match on host+path.
+func (s *CacheService) findCreds(u *url.URL) (RegistryCreds, string, bool) {
+	path := strings.TrimPrefix(u.Path, "/v2/")
+	fullPath := u.Host + "/" + path
+
+	var bestKey string
+	var bestCreds RegistryCreds
+	for key, creds := range s.DefaultCreds {
+		matchKey := strings.TrimRight(key, "/") + "/"
+		if strings.HasPrefix(fullPath, matchKey) && len(key) > len(bestKey) {
+			bestKey = key
+			bestCreds = creds
+		}
+	}
+	if bestKey != "" {
+		return bestCreds, bestKey, true
+	}
+	return RegistryCreds{}, "", false
+}
+
 func (s *CacheService) reqWithCreds(url, method string, headers *http.Header, l **slog.Logger) (*http.Response, error) {
 	resp, err := request(url, method, headers)
 	if err != nil {
@@ -276,9 +297,9 @@ func (s *CacheService) reqWithCreds(url, method string, headers *http.Header, l 
 
 	// retry once with default creds if none provided
 	if resp.StatusCode == 401 && headers.Get("Authorization") == "" {
-		if defaultCreds, ok := s.DefaultCreds[resp.Request.URL.Host]; ok {
+		if defaultCreds, matchedKey, ok := s.findCreds(resp.Request.URL); ok {
 			(*l).Debug("Received 401, retrying with default credentials", "url", url)
-			*l = (*l).With("creds", defaultCreds.Username+"@"+resp.Request.URL.Host)
+			*l = (*l).With("creds", defaultCreds.Username+"@"+matchedKey)
 			realm := resp.Header.Get("WWW-Authenticate")
 			if strings.HasPrefix(realm, "Basic") {
 				headers.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(defaultCreds.Username+":"+defaultCreds.Password)))

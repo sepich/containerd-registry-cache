@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"regexp"
 	"strconv"
@@ -76,6 +77,25 @@ func main() {
 		logRequest(logger, r)
 		router.ServeHTTP(w, r)
 	}
+
+	go func() {
+		pprofPort := *port + 1
+		logger.Info("Starting pprof server", "port", pprofPort)
+
+		pprofMux := http.NewServeMux()
+		pprofMux.HandleFunc("/debug/pprof/", pprof.Index)
+		pprofMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		pprofMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		pprofMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		pprofMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
+		// only kubectl port-forward
+		err := http.ListenAndServe("127.0.0.1:"+strconv.Itoa(pprofPort), pprofMux)
+		if err != nil {
+			logger.Error("Could not start pprof server", "error", err)
+		}
+	}()
+
 	err = http.ListenAndServe(":"+strconv.Itoa(*port), http.HandlerFunc(handler))
 	if err != nil {
 		logger.Error("Could not start http server", "error", err)

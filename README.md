@@ -70,7 +70,7 @@ Run it as:
 - Blobs are reused across all registries, as they are uniquely "content addressable" by sha256
 - Pulls for cached private Manifests require no auth. Use with care for private registries!  
 You can specify such registries as `--private-registry` to skip Manifest caching and only cache Blobs. Still, one can download such private Blob from the cache knowing its sha256 without auth. Also, keep in mind that k8s by default does not prevent running a private image already existing on a Node.
-- You can use registry credentials via `--creds-file` to avoid dockerHub unauthenticated rate limits for example. File is `yaml` with section names equal to corresponding registry hosts:
+- You can use registry credentials via `--creds-file` to avoid dockerHub unauthenticated rate limits for example. File is `yaml` with section names equal to corresponding registry hosts. Keys can also include a path prefix to scope credentials to specific projects (longest prefix match wins):
   ```yaml
   registry-1.docker.io:
     username: puller
@@ -78,6 +78,10 @@ You can specify such registries as `--private-registry` to skip Manifest caching
   ghcr.io:
     username: org-pull
     password: secret2
+  # credentials scoped to a specific GCP Artifact Registry project
+  europe-west3-docker.pkg.dev/my-project:
+    username: _json_key
+    password: '{"type":"service_account",...}'
   ```
 - Prometheus metrics are available on `--port` at `/metrics` endpoint:
   ```ini

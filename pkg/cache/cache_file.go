@@ -134,18 +134,25 @@ func (c *FileWriter) Close(contentType, dockerContentDigest string) error {
 		CacheDate:           time.Now(),
 	}
 	manifestFilePath := filePath + cacheManifestSuffix
-
-	manifestFile, err := os.Create(manifestFilePath)
-	if err != nil {
-		return err
-	}
 	manifestJson, err := json.Marshal(manifest)
 	if err != nil {
 		return err
 	}
 
-	manifestFile.Write(manifestJson)
-	return manifestFile.Close()
+	tmpManifest, err := os.CreateTemp(filepath.Dir(manifestFilePath), ".manifest-*.json")
+	if err != nil {
+		return err
+	}
+	if _, err := tmpManifest.Write(manifestJson); err != nil {
+		tmpManifest.Close()
+		os.Remove(tmpManifest.Name())
+		return err
+	}
+	if err := tmpManifest.Close(); err != nil {
+		os.Remove(tmpManifest.Name())
+		return err
+	}
+	return os.Rename(tmpManifest.Name(), manifestFilePath)
 }
 
 func (c *FileWriter) Cleanup() {
