@@ -27,6 +27,7 @@ func main() {
 	var skipTags = pflag.StringP("skip-tags", "t", "latest", "RegEx of image tags to skip caching")
 	var cacheManifests = pflag.BoolP("cache-manifests", "m", true, "Enable manifests cache")
 	var privReg = pflag.StringArrayP("private-registry", "", []string{}, "Private registry to skip Manifest caching for (can be specified multiple times)")
+	var checkAvailability = pflag.BoolP("check-availability", "c", false, "Check if object is available in the upstream registry on cache hit")
 	var logLevel = pflag.StringP("log-level", "l", "info", "Log level to use (debug, info)")
 	var ver = pflag.BoolP("version", "v", false, "Show version and exit")
 	pflag.Parse()
@@ -72,6 +73,7 @@ func main() {
 		DefaultCreds:      readCreds(*credsFile, logger),
 		CacheManifests:    *cacheManifests,
 		PrivateRegistries: privateRegistries,
+		CheckAvailability: *checkAvailability,
 	}, logger)
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		logRequest(logger, r)
